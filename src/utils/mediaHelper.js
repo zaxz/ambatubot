@@ -371,7 +371,7 @@ async function createBratSticker(text) {
 
 		const filter = [
 			"scale=512:512",
-			`drawtext=fontfile='${fontFile}':text='${formattedText}':fontcolor=black:fontsize=${fontSize}:text_align=left:line_spacing=${lineSpacing}:x=20:y=(h-text_h)/2:fix_bounds=1`,
+			`drawtext=fontfile='${fontFile}':text='${formattedText}':fontcolor=black:fontsize=${fontSize}:line_spacing=${lineSpacing}:x=20:y=(h-text_h)/2:fix_bounds=1`,
 			"gblur=sigma=3.0:steps=2",
 		].join(",");
 
