@@ -1,0 +1,258 @@
+{
+  "kabinet": {
+    "nama": "Kabinet Gendut",
+    "kelas": "3P51",
+    "institusi": "Institut Widya Pratama Pekalongan (IWIMA)",
+    "semboyan": [
+      {
+        "singkatan": "KTL",
+        "kepanjangan": "Karya Tanpa Lelah"
+      },
+      {
+        "singkatan": "CLG",
+        "kepanjangan": "Cerdas, Lincah, dan Gigih"
+      },
+      {
+        "singkatan": "JMBT",
+        "kepanjangan": "Jujur, Mandiri, Berani, dan Tangguh"
+      }
+    ]
+  },
+  "pengurusInti": [
+    {
+      "jabatan": "Presiden",
+      "nama": "Muhammad Zhalla Azhmalhuda",
+      "nim": "25.230.0037"
+    },
+    {
+      "jabatan": "Wakil Presiden",
+      "nama": "M. FAREL AR RIZIEQ",
+      "nim": "25.230.0030"
+    },
+    {
+      "jabatan": "Sekretaris",
+      "nama": "ZAKIYA SALWA SURINOVA",
+      "nim": "25.230.0003"
+    },
+    {
+      "jabatan": "Bendahara",
+      "nama": "MUHAMMAD ARKAN AL FAQIH",
+      "nim": "25.230.0035"
+    }
+  ],
+  "penanggungJawabMatkul": [
+    {
+      "matkul": "Desain Sistem Informasi",
+      "dosen": {
+        "nama": "Prastuti Sulistyorini, M.Kom.",
+        "nomorTelepon": "+62 858-7916-0272"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "MUHAMMAD FIGAR",
+          "nim": "25.230.0047"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "M. IVAN DAYU ESTIAWAN",
+          "nim": "25.230.0005"
+        }
+      ]
+    },
+    {
+      "matkul": "Sistem Informasi Akuntansi",
+      "dosen": {
+        "nama": "TRIA TITIANA, M.Si.Akt.",
+        "nomorTelepon": "+62 819-877-198"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "STEFAN WIJAYA YANTONO",
+          "nim": "25.230.0009"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "DANI ARDIANSYAH",
+          "nim": "25.230.0048"
+        }
+      ]
+    },
+    {
+      "matkul": "Pemrograman Berbasis Web II",
+      "dosen": {
+        "nama": "Taufiqurrohman",
+        "nomorTelepon": "+62 858-4209-0774"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "GALIH TRI ARDIANSYAH",
+          "nim": "25.230.0037"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "AGHNIA AULIA PRATIWI",
+          "nim": "25.230.0017"
+        }
+      ]
+    },
+    {
+      "matkul": "Pengembangan Kecerdasan Buatan",
+      "dosen": {
+        "nama": "Eko Budi Susanto, M.Kom",
+        "nomorTelepon": "+62 856-4006-4830"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "KHAIRANI UTAMI",
+          "nim": "25.230.0015"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "MUHAMMAD AFRIZAL",
+          "nim": "25.230.0016"
+        }
+      ]
+    },
+    {
+      "matkul": "Statistik",
+      "dosen": {
+        "nama": "Tri Pudji Wahjuningsih, M.Si",
+        "nomorTelepon": "+62 852-2660-7569"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "AHMAD FIRDAUS",
+          "nim": "25.230.0039"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "NUR SABRINA SETIANTO",
+          "nim": "25.230.0051"
+        }
+      ]
+    },
+    {
+      "matkul": "Pengelolaan DBMS",
+      "dosen": {
+        "nama": "ENY JUMIATI, M.Kom",
+        "nomorTelepon": "+62 857-4716-1727"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "AULA NAILATUL KHASNA",
+          "nim": "25.230.0056"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "INES DEA MEVIFETY",
+          "nim": "25.230.0044"
+        }
+      ]
+    },
+    {
+      "matkul": "Fundamental ERP",
+      "dosen": {
+        "nama": "ENY JUMIATI, M.Kom",
+        "nomorTelepon": "+62 857-4716-1727"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "M. HIDAYAT SAPUTRA",
+          "nim": "25.230.0031"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "NIBRAS JAUZA SALMA",
+          "nim": "25.230.0043"
+        }
+      ]
+    },
+    {
+      "matkul": "Jaringan Komputer",
+      "dosen": {
+        "nama": "Wahyu Setianto, M.Kom",
+        "nomorTelepon": "+62 815-6958-699"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "NERA NUR AFNI MAINITA",
+          "nim": "25.230.0037"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "SYAIFULLAH ALFA RUQI",
+          "nim": "25.230.0034"
+        }
+      ]
+    },
+    {
+      "matkul": "Bahasa Inggris II",
+      "dosen": {
+        "nama": "RISKI SULISTIYANINGSIH, M.Hum",
+        "nomorTelepon": "+62 856-4262-9800"
+      },
+      "pj": [
+        {
+          "peran": "Koordinator",
+          "nama": "NUR FATIH ALFIKRI",
+          "nim": "25.230.0027"
+        },
+        {
+          "peran": "Anggota",
+          "nama": "AZIZAH IBTISAMAH",
+          "nim": "25.230.0006"
+        }
+      ]
+    }
+  ],
+  "dosen": [
+    {
+      "nama": "Prastuti Sulistyorini, M.Kom.",
+      "nomorTelepon": "+62 858-7916-0272",
+      "matkul": ["Desain Sistem Informasi"]
+    },
+    {
+      "nama": "TRIA TITIANA, M.Si.Akt.",
+      "nomorTelepon": "+62 819-877-198",
+      "matkul": ["Sistem Informasi Akuntansi"]
+    },
+    {
+      "nama": "Taufiqurrohman",
+      "nomorTelepon": "+62 858-4209-0774",
+      "matkul": ["Pemrograman Berbasis Web II"]
+    },
+    {
+      "nama": "Eko Budi Susanto, M.Kom",
+      "nomorTelepon": "+62 856-4006-4830",
+      "matkul": ["Pengembangan Kecerdasan Buatan"]
+    },
+    {
+      "nama": "Tri Pudji Wahjuningsih, M.Si",
+      "nomorTelepon": "+62 852-2660-7569",
+      "matkul": ["Statistik"]
+    },
+    {
+      "nama": "ENY JUMIATI, M.Kom",
+      "nomorTelepon": "+62 857-4716-1727",
+      "matkul": ["Pengelolaan DBMS", "Fundamental ERP"]
+    },
+    {
+      "nama": "Wahyu Setianto, M.Kom",
+      "nomorTelepon": "+62 815-6958-699",
+      "matkul": ["Jaringan Komputer"]
+    },
+    {
+      "nama": "RISKI SULISTIYANINGSIH, M.Hum",
+      "nomorTelepon": "+62 856-4262-9800",
+      "matkul": ["Bahasa Inggris II"]
+    }
+  ]
+}

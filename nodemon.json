@@ -1,0 +1,14 @@
+{
+  "watch": [
+    "index.js",
+    "config.js",
+    ".env",
+    "src"
+  ],
+  "ext": "js,json",
+  "ignore": [
+    "session/**",
+    "node_modules/**"
+  ],
+  "delay": 1000
+}
