@@ -26,6 +26,18 @@ function formatUptime(ms) {
 	return parts.join(" ");
 }
 
+// Kode warna ANSI standar untuk tampilan log konsol yang bersih dan berwarna
+const color = {
+	reset: "\x1b[0m",
+	dim: "\x1b[90m",
+	bold: "\x1b[1m",
+	cyan: "\x1b[36m",
+	green: "\x1b[32m",
+	yellow: "\x1b[33m",
+	magenta: "\x1b[35m",
+	blue: "\x1b[34m",
+};
+
 // Cache nama grup agar tidak berulang kali memanggil network request ke WhatsApp
 const groupNameCache = new Map();
 
@@ -52,17 +64,17 @@ function getTimestamp() {
  * Mendapatkan label chat bersih (nama grup atau [PRIVAT]) tanpa ID/JID WhatsApp
  */
 async function getChatLabel(sock, from, isGroup) {
-	if (!isGroup) return "[PRIVAT]";
+	if (!isGroup) return `${color.blue}[PRIVAT]${color.reset}`;
 	if (groupNameCache.has(from)) {
-		return `[GRUP: ${groupNameCache.get(from)}]`;
+		return `${color.magenta}[GRUP: ${groupNameCache.get(from)}]${color.reset}`;
 	}
 	try {
 		const meta = await sock.groupMetadata(from);
 		const name = meta?.subject || "Grup";
 		groupNameCache.set(from, name);
-		return `[GRUP: ${name}]`;
+		return `${color.magenta}[GRUP: ${name}]${color.reset}`;
 	} catch (e) {
-		return "[GRUP]";
+		return `${color.magenta}[GRUP]${color.reset}`;
 	}
 }
 
@@ -125,16 +137,17 @@ async function handleMessage(sock, m) {
 		const isCommand = trimmedBody.startsWith(prefix);
 
 
-		// Logging pesan masuk & command (bersih tanpa ID/JID WA, dilengkapi jam & tanggal)
-		const time = getTimestamp();
+		// Logging pesan masuk & command (berwarna, bersih tanpa ID WA, jam & tanggal)
+		const time = `${color.dim}[${getTimestamp()}]${color.reset}`;
 		const chatLabel = await getChatLabel(sock, from, isGroup);
 		const displayBody = cleanDisplayBody(trimmedBody);
 		const preview = displayBody.length > 60 ? displayBody.slice(0, 60) + "…" : displayBody;
+		const userTag = `${color.bold}[${pushName}]${color.reset}`;
 
 		if (isCommand) {
-			console.log(`[${time}] [CMD] ${chatLabel} [${pushName}]: ${displayBody}`);
+			console.log(`${time} ${color.green}${color.bold}[CMD]${color.reset} ${chatLabel} ${userTag}: ${color.green}${displayBody}${color.reset}`);
 		} else if (trimmedBody) {
-			console.log(`[${time}] [MSG] ${chatLabel} [${pushName}]: "${preview}"`);
+			console.log(`${time} ${color.yellow}[MSG]${color.reset} ${chatLabel} ${userTag}: "${preview}"`);
 		}
 
 		// Deteksi konteks pesan kutipan (reply/quote)
@@ -208,7 +221,8 @@ async function handleMessage(sock, m) {
 				aiCooldownMap.set(cooldownKey, now);
 
 				const triggerType = isGroup ? (isMentioned ? "Mention" : "Reply") : "Pesan Privat";
-				console.log(`[${getTimestamp()}] [AI] ${triggerType} dari [${pushName}] di ${chatLabel}: "${displayBody}"`);
+				const userTag = `${color.bold}[${pushName}]${color.reset}`;
+				console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  ${triggerType} dari ${userTag} di ${chatLabel}: "${displayBody}"`);
 
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
@@ -239,7 +253,7 @@ async function handleMessage(sock, m) {
 						config,
 					});
 					await sock.sendMessage(from, { text: aiReply }, { quoted: m });
-					console.log(`[${getTimestamp()}] [AI] Membalas [${pushName}]: "${aiReply.slice(0, 60)}..."`);
+					console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  Membalas ${color.bold}[${pushName}]${color.reset}: ${color.cyan}"${aiReply.slice(0, 60)}..."${color.reset}`);
 				} catch (err) {
 					console.error("[AI] Error generateReply AI:", err.message);
 					await reply("Maaf, AI sedang gangguan. Coba lagi nanti.");
