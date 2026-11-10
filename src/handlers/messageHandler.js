@@ -220,9 +220,6 @@ async function handleMessage(sock, m) {
 			if (now - lastAi >= config.ai.cooldownMs) {
 				aiCooldownMap.set(cooldownKey, now);
 
-				const triggerType = isGroup ? (isMentioned ? "Mention" : "Reply") : "Pesan Privat";
-				const userTag = `${color.bold}[${pushName}]${color.reset}`;
-				console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  ${triggerType} dari ${userTag} di ${chatLabel}: "${displayBody}"`);
 
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
