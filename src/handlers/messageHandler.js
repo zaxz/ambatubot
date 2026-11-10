@@ -26,6 +26,46 @@ function formatUptime(ms) {
 	return parts.join(" ");
 }
 
+// Cache nama grup agar tidak berulang kali memanggil network request ke WhatsApp
+const groupNameCache = new Map();
+
+/**
+ * Format waktu saat ini di zona waktu WIB (UTC+7)
+ */
+function getTimestamp() {
+	const now = new Date();
+	const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+	const wib = new Date(utc + 7 * 3600000);
+
+	const pad = (n) => String(n).padStart(2, "0");
+	const d = pad(wib.getDate());
+	const mo = pad(wib.getMonth() + 1);
+	const y = wib.getFullYear();
+	const h = pad(wib.getHours());
+	const mi = pad(wib.getMinutes());
+	const s = pad(wib.getSeconds());
+
+	return `${d}/${mo}/${y} ${h}:${mi}:${s}`;
+}
+
+/**
+ * Mendapatkan label chat bersih (nama grup atau [PRIVAT]) tanpa ID/JID WhatsApp
+ */
+async function getChatLabel(sock, from, isGroup) {
+	if (!isGroup) return "[PRIVAT]";
+	if (groupNameCache.has(from)) {
+		return `[GRUP: ${groupNameCache.get(from)}]`;
+	}
+	try {
+		const meta = await sock.groupMetadata(from);
+		const name = meta?.subject || "Grup";
+		groupNameCache.set(from, name);
+		return `[GRUP: ${name}]`;
+	} catch (e) {
+		return "[GRUP]";
+	}
+}
+
 /**
  * Handler utama untuk seluruh pesan masuk Baileys
  * @param {Object} sock - Instance Baileys WASocket
@@ -67,15 +107,16 @@ async function handleMessage(sock, m) {
 		const isCommand = trimmedBody.startsWith(prefix);
 
 
-		// Logging pesan masuk & command prefix
-		const chatLabel = isGroup ? `GRUP(${from})` : `PRIV(${from})`;
+		// Logging pesan masuk & command (bersih tanpa ID/JID WA, dilengkapi jam & tanggal)
+		const time = getTimestamp();
+		const chatLabel = await getChatLabel(sock, from, isGroup);
 		const preview = trimmedBody.length > 60 ? trimmedBody.slice(0, 60) + "…" : trimmedBody;
-		console.log(`[MSG] ${chatLabel} | ${pushName} (${sender}): "${preview}"`);
 
 		if (isCommand) {
-			console.log(`[CMD] ${chatLabel} | ${pushName}: ${trimmedBody}`);
+			console.log(`[${time}] [CMD] ${chatLabel} [${pushName}]: ${trimmedBody}`);
+		} else if (trimmedBody) {
+			console.log(`[${time}] [MSG] ${chatLabel} [${pushName}]: "${preview}"`);
 		}
-
 
 		// Deteksi konteks pesan kutipan (reply/quote)
 		const contextInfo = msg[messageType]?.contextInfo;
@@ -152,7 +193,7 @@ async function handleMessage(sock, m) {
 			if (now - lastAi >= config.ai.cooldownMs) {
 				aiCooldownMap.set(cooldownKey, now);
 
-				console.log(`[AI] Mention/Reply terdeteksi dari ${pushName} (${chatLabel}): "${trimmedBody}"`);
+				console.log(`[${getTimestamp()}] [AI] Mention dari [${pushName}] di ${chatLabel}: "${trimmedBody}"`);
 
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
@@ -183,7 +224,7 @@ async function handleMessage(sock, m) {
 						config,
 					});
 					await sock.sendMessage(from, { text: aiReply }, { quoted: m });
-					console.log(`[AI] Berhasil membalas ${pushName}: "${aiReply.slice(0, 60)}..."`);
+					console.log(`[${getTimestamp()}] [AI] Membalas [${pushName}]: "${aiReply.slice(0, 60)}..."`);
 				} catch (err) {
 					console.error("[AI] Error generateReply AI:", err.message);
 					await reply("Maaf, AI sedang gangguan. Coba lagi nanti.");
