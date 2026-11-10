@@ -78,6 +78,24 @@ async function handleMessage(sock, m) {
 		const sender = isGroup ? m.key.participant : from;
 		const pushName = m.pushName || "Sahabat";
 
+		// Identitas bot (JID, LID, dan nomor telepon)
+		const botJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
+		const botLid = sock.user?.lid ? jidNormalizedUser(sock.user.lid) : null;
+		const botNumber = botJid
+			? botJid.replace(/[^0-9]/g, "")
+			: (config.pairingNumber || "").replace(/[^0-9]/g, "");
+		const botLidNumber = botLid ? botLid.replace(/[^0-9]/g, "") : null;
+
+		// Pembersih tag ID/nomor WA untuk tampilan log agar menjadi @NamaBot yang rapi
+		const cleanDisplayBody = (txt) => {
+			if (!txt) return "";
+			let cleaned = txt;
+			if (botNumber) cleaned = cleaned.replace(new RegExp(`@${botNumber}`, "g"), `@${config.botName}`);
+			if (botLidNumber) cleaned = cleaned.replace(new RegExp(`@${botLidNumber}`, "g"), `@${config.botName}`);
+			cleaned = cleaned.replace(/@\d{8,20}/g, `@${config.botName}`);
+			return cleaned;
+		};
+
 		// Normalisasi nomor pengirim untuk pengecekan status owner
 		const cleanSender = sender.replace(/[^0-9]/g, "");
 		const isOwner = config.ownerNumbers.some((num) => num.replace(/[^0-9]/g, "") === cleanSender);
@@ -110,10 +128,11 @@ async function handleMessage(sock, m) {
 		// Logging pesan masuk & command (bersih tanpa ID/JID WA, dilengkapi jam & tanggal)
 		const time = getTimestamp();
 		const chatLabel = await getChatLabel(sock, from, isGroup);
-		const preview = trimmedBody.length > 60 ? trimmedBody.slice(0, 60) + "…" : trimmedBody;
+		const displayBody = cleanDisplayBody(trimmedBody);
+		const preview = displayBody.length > 60 ? displayBody.slice(0, 60) + "…" : displayBody;
 
 		if (isCommand) {
-			console.log(`[${time}] [CMD] ${chatLabel} [${pushName}]: ${trimmedBody}`);
+			console.log(`[${time}] [CMD] ${chatLabel} [${pushName}]: ${displayBody}`);
 		} else if (trimmedBody) {
 			console.log(`[${time}] [MSG] ${chatLabel} [${pushName}]: "${preview}"`);
 		}
@@ -161,12 +180,6 @@ async function handleMessage(sock, m) {
 		// =========================================================================
 		// 1.5. AI BALASAN SERTAMAN (MENTION / BALAS KE PESAN BOT)
 		// =========================================================================
-		const botJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
-		const botLid = sock.user?.lid ? jidNormalizedUser(sock.user.lid) : null;
-		const botNumber = botJid
-			? botJid.replace(/[^0-9]/g, "")
-			: (config.pairingNumber || "").replace(/[^0-9]/g, "");
-
 		const mentionedJids = (contextInfo?.mentionedJid || []).map((j) => jidNormalizedUser(j));
 		const isMentioned =
 			Boolean(botJid && mentionedJids.includes(botJid)) ||
@@ -180,20 +193,22 @@ async function handleMessage(sock, m) {
 			Boolean(botLid && quotedParticipant === botLid) ||
 			contextInfo?.quotedMessage?.fromMe === true;
 
-		if (
-			!isCommand &&
-			trimmedBody &&
-			config.ai.enabled &&
-			(isMentioned || isReplyingToBot) &&
-			!(config.ai.mentionOnlyInGroup && !isGroup)
-		) {
+		// AI aktif jika:
+		// 1. Di grup: bot di-mention ATAU membalas chat bot
+		// 2. Di chat privat: langsung aktif (selama mentionOnlyInGroup tidak aktif)
+		const shouldTriggerAi = isGroup
+			? (isMentioned || isReplyingToBot)
+			: !config.ai.mentionOnlyInGroup;
+
+		if (!isCommand && trimmedBody && config.ai.enabled && shouldTriggerAi) {
 			const cooldownKey = sender || from;
 			const now = Date.now();
 			const lastAi = aiCooldownMap.get(cooldownKey) || 0;
 			if (now - lastAi >= config.ai.cooldownMs) {
 				aiCooldownMap.set(cooldownKey, now);
 
-				console.log(`[${getTimestamp()}] [AI] Mention dari [${pushName}] di ${chatLabel}: "${trimmedBody}"`);
+				const triggerType = isGroup ? (isMentioned ? "Mention" : "Reply") : "Pesan Privat";
+				console.log(`[${getTimestamp()}] [AI] ${triggerType} dari [${pushName}] di ${chatLabel}: "${displayBody}"`);
 
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
