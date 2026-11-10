@@ -141,13 +141,13 @@ async function handleMessage(sock, m) {
 		const time = `${color.dim}[${getTimestamp()}]${color.reset}`;
 		const chatLabel = await getChatLabel(sock, from, isGroup);
 		const displayBody = cleanDisplayBody(trimmedBody);
-		const preview = displayBody.length > 60 ? displayBody.slice(0, 60) + "…" : displayBody;
+		const displayPreview = (displayBody.length > 60 ? displayBody.slice(0, 60) + "…" : displayBody).replace(/\n/g, `\n${color.yellow}`);
 		const userTag = `${color.bold}[${pushName}]${color.reset}`;
 
 		if (isCommand) {
 			console.log(`${time} ${color.green}${color.bold}[CMD]${color.reset} ${chatLabel} ${userTag}: ${color.green}${displayBody}${color.reset}`);
 		} else if (trimmedBody) {
-			console.log(`${time} ${color.yellow}[MSG]${color.reset} ${chatLabel} ${userTag}: "${preview}"`);
+			console.log(`${time} ${color.yellow}[MSG]${color.reset} ${chatLabel} ${userTag}: "${displayPreview}"`);
 		}
 
 		// Deteksi konteks pesan kutipan (reply/quote)
@@ -250,7 +250,8 @@ async function handleMessage(sock, m) {
 						config,
 					});
 					await sock.sendMessage(from, { text: aiReply }, { quoted: m });
-					console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  Membalas ${color.bold}[${pushName}]${color.reset}: ${color.cyan}"${aiReply.slice(0, 60)}..."${color.reset}`);
+					const aiPreview = (aiReply.length > 70 ? aiReply.slice(0, 70) + "…" : aiReply).replace(/\n/g, `\n${color.cyan}`);
+					console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  Membalas ${color.bold}[${pushName}]${color.reset}: ${color.cyan}"${aiPreview}"${color.reset}`);
 				} catch (err) {
 					console.error("[AI] Error generateReply AI:", err.message);
 					await reply("Maaf, AI sedang gangguan. Coba lagi nanti.");
