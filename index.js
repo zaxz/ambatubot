@@ -112,7 +112,10 @@ const GROUP_META_TTL_MS = 60 * 1000;
 async function startBot() {
   console.log('\n======================================================');
   console.log(`🚀 Memulai ${config.botName}...`);
-  console.log('Library: @whiskeysockets/baileys');
+  const baileysVersion = (() => {
+    try { return require('@whiskeysockets/baileys/package.json').version; } catch { return 'unknown'; }
+  })();
+  console.log(`Library: @whiskeysockets/baileys v${baileysVersion} (Node ${process.version})`);
   console.log('======================================================\n');
 
   // Ambil versi Baileys terbaru dari server WhatsApp
