@@ -20,6 +20,52 @@ if (!fs.existsSync(sessionDir)) {
   fs.mkdirSync(sessionDir, { recursive: true });
 }
 
+const lockFile = path.join(sessionDir, '.bot.lock');
+
+function isPidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === 'EPERM';
+  }
+}
+
+function logDuplicateAlert(headline, hint) {
+  const redBold = '\x1b[31m\x1b[1m';
+  const yellow = '\x1b[33m';
+  const reset = '\x1b[0m';
+  console.warn(`${redBold}🚨 [ALERT PROSES GANDA] ${headline}${reset}`);
+  console.warn(`${yellow}   ${hint}${reset}`);
+}
+
+function checkAndAcquireLock() {
+  try {
+    if (fs.existsSync(lockFile)) {
+      const prevPid = Number(fs.readFileSync(lockFile, 'utf8').trim());
+      if (prevPid && prevPid !== process.pid && isPidAlive(prevPid)) {
+        logDuplicateAlert(
+          `Proses bot lain masih aktif di mesin ini (PID: ${prevPid})!`,
+          'Menjalankan >1 proses dengan sesi yang sama akan memicu Status 440 (conflict). Matikan salah satu terminal/proses.'
+        );
+      }
+    }
+    fs.writeFileSync(lockFile, String(process.pid), 'utf8');
+  } catch (err) {
+    // Abaikan error lockfile agar bot tetap bisa berjalan
+  }
+}
+
+function releaseLock() {
+  try {
+    if (fs.existsSync(lockFile) && fs.readFileSync(lockFile, 'utf8').trim() === String(process.pid)) {
+      fs.unlinkSync(lockFile);
+    }
+  } catch (err) {
+    // Abaikan error hapus lockfile
+  }
+}
 /**
  * Inisialisasi dan menghubungkan bot WhatsApp menggunakan Whiskeysockets Baileys
  */
@@ -88,6 +134,13 @@ async function startBot() {
 
       console.log(`⚠️ Koneksi terputus. Alasan: ${reason} (Status: ${statusCode})`);
 
+      if (statusCode === DisconnectReason.connectionReplaced) {
+        logDuplicateAlert(
+          'Sesi WhatsApp ini terputus karena konflik koneksi (Status 440)!',
+          'Ada instance bot lain yang aktif memakai sesi yang sama (mis. bot di server + lokal bersamaan, atau terminal ganda). Matikan salah satu instance.'
+        );
+      }
+
       if (shouldReconnect) {
         console.log('🔄 Mencoba menghubungkan ulang ke WhatsApp dalam 5 detik...');
         setTimeout(() => startBot(), 5000);
@@ -130,14 +183,23 @@ async function startBot() {
 }
 
 // Tangani penutupan proses secara graceful
+process.on('exit', releaseLock);
 process.on('SIGINT', () => {
   console.log('\nMematikan bot secara aman...');
+  releaseLock();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  releaseLock();
   process.exit(0);
 });
 
 process.on('unhandledRejection', (err) => {
   console.error('Unhandled Rejection terdeteksi:', err);
 });
+
+// Cek apakah ada proses bot ganda sebelum memulai koneksi
+checkAndAcquireLock();
 
 // Jalankan bot
 startBot();
