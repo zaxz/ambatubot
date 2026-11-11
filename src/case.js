@@ -78,6 +78,12 @@ async function handleCase(context) {
 		case "menu":
 		case "help": {
 			const uptime = formatUptime(Date.now() - startTime);
+			const ownerSection = isOwner
+				? `┣━━━❰ 📢 *OWNER* ❱━━━┫\n` +
+				  `┃ • *${prefix}listgrup* - Daftar grup bot (Owner)\n` +
+				  `┃ • *${prefix}join* <link> - Gabung ke grup (Owner)\n` +
+				  `┃ • *${prefix}leave* [no/id] - Keluar grup (Owner)\n`
+				: "";
 			const menuText = `╭━━━❰ *${config.botName}* ❱━━━╮
 ┃
 ┃ 🤖 *Status Bot:* Online
@@ -104,12 +110,8 @@ async function handleCase(context) {
 ┣━━━❰ ⚡ *INFO & SISTEM* ❱━━━┫
 ┃ • *${prefix}ping* - Cek respon & latensi
 ┃ • *${prefix}runtime* - Status server & RAM
-┣━━━❰ 📢 *OWNER* ❱━━━┫
-┃ • *${prefix}listgrup* - Daftar grup bot (Owner)
-┃ • *${prefix}join* <link> - Gabung ke grup (Owner)
-┃ • *${prefix}leave* [no/id] - Keluar grup (Owner)
-┃
-╰━━━━━━━━━━━━━━━━━━━━━━━╯
+${ownerSection}┃
+╰━━━━━━━━━━━━━━━━━╯
 _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 
 			await reply(menuText);
