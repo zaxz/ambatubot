@@ -49,13 +49,6 @@ module.exports = {
     ]
   },
 
-  // Konfigurasi Pengiriman Broadcast Otomatis
-  broadcast: {
-    // Jeda aman antar pesan (milidetik) untuk meminimalisir risiko blokir dari WhatsApp
-    delayMinMs: 2000, // 2 detik
-    delayMaxMs: 4000  // 4 detik
-  },
-
   // Konfigurasi AI (Google Gemini) untuk balasan mention dengan personalisasi
   ai: {
     enabled: true,

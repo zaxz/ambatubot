@@ -8,7 +8,6 @@ const {
 	createMemeSticker,
 	createBratSticker,
 } = require("./utils/mediaHelper");
-const { sendBroadcast } = require("./handlers/broadcastHandler");
 const { getJadwalKuliah } = require("./utils/jadwalHelper");
 const { getPjMatkul } = require("./utils/pjHelper");
 
@@ -56,6 +55,20 @@ async function handleCase(context) {
 		startTime,
 	} = context;
 
+	// Helper untuk memberi reaksi emoji ke pesan masuk (best-effort)
+	const react = async (emoji) => {
+		try {
+			await sock.sendMessage(from, {
+				react: {
+					text: emoji,
+					key: m.key,
+				},
+			});
+		} catch (e) {
+			// Abaikan gagal reaksi agar proses utama tetap berjalan
+		}
+	};
+
 	switch (command) {
 		// =========================================================================
 		// MENU / BANTUAN
@@ -75,7 +88,7 @@ async function handleCase(context) {
 ┃ • *${prefix}smeme* <atas> | <bawah>
 ┃   _Bikin stiker meme dengan teks._
 ┃ • *${prefix}brat* <teks>
-┃   _Bikin stiker teks brat (meme putih)._
+┃   _Bikin stiker teks brat putih (teks besar, emoji berwarna, blur)._
 ┃ • *${prefix}toimg*
 ┃   _Ubah stiker jadi gambar kembali._
 ┣━━━❰ 📚 *AKADEMIK & JADWAL* ❱━━━┫
@@ -88,7 +101,7 @@ async function handleCase(context) {
 ┃ • *${prefix}ping* - Cek respon & latensi
 ┃ • *${prefix}runtime* - Status server & RAM
 ┣━━━❰ 📢 *OWNER* ❱━━━┫
-┃ • *${prefix}bc* <teks> - Kirim broadcast
+┃ • *${prefix}listgrup* - Daftar grup bot (Owner)
 ┃
 ╰━━━━━━━━━━━━━━━━━━━━━━━╯
 _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
@@ -160,7 +173,17 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				);
 			}
 
-			await reply("⏳ Sedang memproses stiker, mohon tunggu sebentar...");
+			if (isDirectVideo || isQuotedVideo) {
+				const targetVideo = isDirectVideo ? msg.videoMessage : quotedMsg.videoMessage;
+				const seconds = targetVideo.seconds || 0;
+				if (seconds > config.sticker.maxVideoDurationSeconds) {
+					return await reply(
+						`⚠️ Durasi video terlalu panjang! Maksimal adalah *${config.sticker.maxVideoDurationSeconds} detik*.`
+					);
+				}
+			}
+
+			await react("⏳");
 
 			try {
 				let stickerBuffer;
@@ -172,22 +195,16 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					stickerBuffer = await addExif(webpBuffer, packname, author);
 				} else if (isDirectVideo || isQuotedVideo) {
 					const targetMedia = isDirectVideo ? msg.videoMessage : quotedMsg.videoMessage;
-
-					const seconds = targetMedia.seconds || 0;
-					if (seconds > config.sticker.maxVideoDurationSeconds) {
-						return await reply(
-							`⚠️ Durasi video terlalu panjang! Maksimal adalah *${config.sticker.maxVideoDurationSeconds} detik*.`
-						);
-					}
-
 					const rawBuffer = await downloadMediaBuffer(targetMedia, "video");
 					const webpBuffer = await videoToWebp(rawBuffer, config.sticker.maxVideoDurationSeconds);
 					stickerBuffer = await addExif(webpBuffer, packname, author);
 				}
 
 				await sock.sendMessage(from, { sticker: stickerBuffer }, { quoted: m });
+				await react("✅");
 			} catch (err) {
 				console.error("Error saat membuat stiker:", err);
+				await react("❌");
 				await reply(`❌ Gagal membuat stiker: ${err.message}`);
 			}
 			break;
@@ -230,7 +247,7 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				);
 			}
 
-			await reply("⏳ Sedang membuat stiker meme...");
+			await react("⏳");
 
 			try {
 				let rawImageBuffer;
@@ -247,8 +264,10 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				const finalSticker = await addExif(memeWebp, config.sticker.packName, config.sticker.packAuthor);
 
 				await sock.sendMessage(from, { sticker: finalSticker }, { quoted: m });
+				await react("✅");
 			} catch (err) {
 				console.error("Error saat membuat smeme:", err);
+				await react("❌");
 				await reply(`❌ Gagal membuat stiker meme: ${err.message}`);
 			}
 			break;
@@ -273,15 +292,17 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				);
 			}
 
-			await reply("⏳ Sedang membuat stiker brat...");
+			await react("⏳");
 
 			try {
 				const rawBratWebp = await createBratSticker(bratText.trim());
 				const finalSticker = await addExif(rawBratWebp, config.sticker.packName, config.sticker.packAuthor);
 
 				await sock.sendMessage(from, { sticker: finalSticker }, { quoted: m });
+				await react("✅");
 			} catch (err) {
 				console.error("Error saat membuat stiker brat:", err);
+				await react("❌");
 				await reply(`❌ Gagal membuat stiker brat: ${err.message}`);
 			}
 			break;
@@ -298,53 +319,59 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				);
 			}
 
+			await react("⏳");
+
 			try {
-				await reply("⏳ Mengonversi stiker ke gambar...");
 				const rawSticker = await downloadMediaBuffer(quotedMsg.stickerMessage, "sticker");
 				const pngBuffer = await webpToImage(rawSticker);
 
-				await sock.sendMessage(
-					from,
-					{ image: pngBuffer, caption: "✅ Berhasil mengubah stiker menjadi gambar!" },
-					{ quoted: m }
-				);
+				await sock.sendMessage(from, { image: pngBuffer }, { quoted: m });
+				await react("✅");
 			} catch (err) {
 				console.error("Error saat toimg:", err);
+				await react("❌");
 				await reply(`❌ Gagal mengonversi stiker ke gambar: ${err.message}`);
 			}
 			break;
 		}
 
 		// =========================================================================
-		// BROADCAST OTOMATIS (.bc)
+		// DAFTAR GRUP YANG DIIKUTI BOT (.listgrup - KHUSUS OWNER)
 		// =========================================================================
-		case "bc":
-		case "broadcast": {
+		case "listgrup":
+		case "listgroup": {
 			if (!isOwner) {
 				return await reply("⛔ Perintah ini hanya dapat digunakan oleh Pemilik (Owner) Bot!");
 			}
 
-			if (!text) {
-				return await reply(
-					`⚠️ Format broadcast salah!\nContoh: *${prefix}bc Pengumuman penting untuk semua pelanggan!*`
+			await react("⏳");
+
+			try {
+				const groupsMap = await sock.groupFetchAllParticipating();
+				const groups = Object.values(groupsMap || {}).sort((a, b) =>
+					(a.subject || "").localeCompare(b.subject || "", "id")
 				);
+
+				if (groups.length === 0) {
+					await reply("ℹ️ Bot saat ini belum tergabung di grup mana pun.");
+					await react("✅");
+					break;
+				}
+
+				const lines = groups.map((g, idx) => {
+					const name = g.subject || "Tanpa Nama";
+					const members = g.size ?? g.participants?.length ?? 0;
+					const tag = g.isCommunity ? " _(Komunitas)_" : "";
+					return `${idx + 1}. *${name}*${tag}\n   👥 ${members} anggota`;
+				});
+
+				await reply(`📋 *DAFTAR GRUP (${groups.length})*\n\n${lines.join("\n\n")}`);
+				await react("✅");
+			} catch (err) {
+				console.error("Error saat mengambil daftar grup:", err);
+				await react("❌");
+				await reply(`❌ Gagal mengambil daftar grup: ${err.message}`);
 			}
-
-			await reply("📢 Memulai proses broadcast pesan dengan jeda anti-spam...");
-
-			const targetList = config.ownerNumbers.map((num) => `${num.replace(/[^0-9]/g, "")}@s.whatsapp.net`);
-
-			const broadcastContent = {
-				text: `📢 *PESAN SIARAN RESMI*\n\n${text}\n\n_Pesan otomatis dikirim oleh ${config.botName}_`,
-			};
-
-			const result = await sendBroadcast(sock, targetList, broadcastContent, (prog) => {
-				console.log(`[Broadcast] Progres: ${prog.current}/${prog.total} - ${prog.jid} (${prog.status})`);
-			});
-
-			await reply(
-				`✅ *Broadcast Selesai!*\n• Berhasil: ${result.success}\n• Gagal: ${result.failed}\n• Total Tujuan: ${targetList.length}`
-			);
 			break;
 		}
 

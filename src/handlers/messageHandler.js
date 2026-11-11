@@ -109,8 +109,10 @@ async function handleMessage(sock, m) {
 		};
 
 		// Normalisasi nomor pengirim untuk pengecekan status owner
-		const cleanSender = sender.replace(/[^0-9]/g, "");
-		const isOwner = config.ownerNumbers.some((num) => num.replace(/[^0-9]/g, "") === cleanSender);
+		const senderNumbers = [sender, m.key.participantPn, m.key.senderPn]
+			.filter(Boolean)
+			.map((jid) => jid.replace(/[^0-9]/g, ""));
+		const isOwner = config.ownerNumbers.some((num) => senderNumbers.includes(num.replace(/[^0-9]/g, "")));
 
 		// Ekstraksi pesan aktual (antisipasi ephemeral & viewOnce wrapper)
 		let msg = m.message;

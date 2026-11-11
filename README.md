@@ -1,6 +1,6 @@
 # WhatsApp Bot: Otomatisasi Pesan & Pembuat Stiker
 
-Bot WhatsApp modern dan handal yang dibangun menggunakan library [@whiskeysockets/baileys](https://github.com/whiskeysockets/Baileys). Bot ini dirancang khusus untuk kebutuhan **otomatisasi pesan (auto-responder, FAQ, broadcast siaran)** dan **pembuatan stiker WhatsApp (gambar, video/GIF bergerak, serta custom metadata EXIF)**.
+Bot WhatsApp modern dan handal yang dibangun menggunakan library [@whiskeysockets/baileys](https://github.com/whiskeysockets/Baileys). Bot ini dirancang khusus untuk kebutuhan **otomatisasi pesan (auto-responder, FAQ, AI asisten)** dan **pembuatan stiker WhatsApp (gambar, video/GIF bergerak, stiker meme, stiker brat, serta custom metadata EXIF)**.
 
 ---
 
@@ -20,10 +20,6 @@ Bot WhatsApp modern dan handal yang dibangun menggunakan library [@whiskeysocket
 * **Variabel Dinamis**: Mendukung placeholder otomatis seperti `{name}` (nama pengirim), `{time}` (jam saat ini), dan `{date}` (tanggal hari ini).
 * **Anti-Spam Cooldown**: Mencegah bot membalas berulang kali dalam jeda waktu singkat jika pengirim melakukan spam pesan serupa.
 * **Simulasi Mengetik (*Typing Presence*)**: Menampilkan status "sedang mengetik..." sebelum membalas agar terlihat natural layaknya manusia.
-
-### 3. 📢 Broadcast Otomatis Aman (Anti-Ban Jitter)
-* Mengirimkan pesan siaran secara massal ke daftar nomor atau grup.
-* Dilengkapi jeda acak (*random delay jitter*, default 2–4 detik antar pesan) untuk mematuhi ritme pengiriman dan meminimalisir risiko blokir dari WhatsApp.
 
 ### 6. 🤖 Balasan AI dengan Personalisasi (Mention)
 * **Pemicu**: Balasan AI aktif ketika bot disebut (*mention*) di grup, atau ketika seseorang membalas pesan milik bot sendiri.
@@ -101,13 +97,13 @@ npm start
 | `.menu` / `.help` | Menampilkan daftar perintah dan status bot | Kirim `.menu` |
 | `.s` / `.sticker` | Mengubah gambar/video menjadi stiker WhatsApp | Kirim gambar dengan caption `.s` atau reply gambar dengan `.s` |
 | `.smeme <atas> \| <bawah>` | Membuat stiker meme dengan teks atas dan bawah | Kirim gambar dengan caption `.smeme KETIKA CODING \| TIBA-TIBA ERROR` |
-| `.brat <teks>` | Membuat stiker teks brat putih tren meme | Kirim `.brat sok iye loe jadi orang` |
+| `.brat <teks>` | Membuat stiker teks brat putih: huruf besar rata kanan-kiri, emoji berwarna, efek blur | Kirim `.brat sok iye loe jadi orang 🙏` |
 | `.toimg` | Mengubah stiker menjadi file gambar (PNG) | Reply sebuah stiker dengan `.toimg` |
 | `.jadwal <kelas> [hari]` | Cek jadwal kuliah IWIMA (hari ini, besok, lusa, semua) | Kirim `.jadwal 3p51 hari ini` atau `.jadwal 3p51 besok` |
 | `.pj <kelas> <matkul>` | Cek Penanggung Jawab (PJ) matkul & kontak WA dosen | Kirim `.pj 3p51 statistik` atau `.pj 3p51 semua` |
 | `.ping` | Mengecek kecepatan respon bot (latensi server) | Kirim `.ping` |
 | `.runtime` | Menampilkan durasi aktif bot dan penggunaan RAM | Kirim `.runtime` |
-| `.bc <teks>` | Mengirim pesan siaran (Khusus Owner) | Kirim `.bc Promo Spesial Hari Ini!` |
+| `.listgrup` | Menampilkan daftar grup yang diikuti bot (Khusus Owner) | Kirim `.listgrup` |
 
 ---
 
@@ -142,6 +138,5 @@ Untuk menambahkan respon otomatis baru, buka file `config.js` pada bagian `autoR
 
 WhatsApp memiliki algoritma deteksi perilaku bot dan spam yang ketat. Ikuti panduan berikut agar nomor Anda tetap aman:
 1. **Gunakan Nomor yang Sudah Berumur**: Hindari menggunakan nomor baru yang belum pernah aktif. Sebaiknya gunakan nomor yang sudah sering digunakan untuk percakapan normal.
-2. **Jangan Mengirim Broadcast Terlalu Agresif**: Jangan mengirim pesan ke ratusan nomor dalam hitungan detik. Pertahankan fitur jeda (`delayMinMs` dan `delayMaxMs` di `config.js`).
-3. **Targetkan Kontak yang Menyimpan Nomor Anda**: Pesan yang dikirim ke orang asing yang tidak menyimpan nomor Anda rentan dilaporkan (*Report as Spam/Block*).
-4. **Berikan Opsi Berhenti (*Opt-out*)**: Jika membuat bot bisnis/broadcast, sertakan teks seperti *"Ketik STOP untuk berhenti menerima pesan"*.
+2. **Jangan Mengirim Pesan Terlalu Agresif**: Hindari memicu pengiriman pesan beruntun dalam jumlah besar agar akun tidak dianggap spam.
+3. **Jaga Interaksi Natural**: Gunakan jeda cooldown untuk auto-reply dan balasan AI di grup ramai.

@@ -5,6 +5,16 @@ const path = require("path");
 const os = require("os");
 const webp = require("node-webpmux");
 const axios = require("axios");
+const { loadFont } = require("./ttfFont");
+const { getEmojiAssetPath } = require("./emojiAsset");
+
+/**
+ * Menyiapkan path agar aman dipakai di dalam opsi filter FFmpeg.
+ * @param {string} filePath
+ */
+function escapeFilterPath(filePath) {
+	return path.resolve(filePath).replace(/\\/g, "/").replace(/:/g, "\\:");
+}
 
 /**
  * Download media buffer dari pesan Baileys
@@ -194,6 +204,129 @@ async function addExif(webpBuffer, packname = "AutoBot Sticker", author = "Whisk
 		return webpBuffer;
 	}
 }
+const MEME_CANVAS = 512;
+const MEME_PADDING_X = 18;
+const MEME_PADDING_Y = 14;
+const MEME_CONTENT_W = MEME_CANVAS - MEME_PADDING_X * 2;
+const MEME_MAX_FONT = 112;
+const MEME_MIN_FONT = 22;
+const MEME_INK_HEIGHT_EM = 0.824; // tinggi tinta huruf kapital Impact
+const MEME_FONT = path.resolve(__dirname, "../assets/impact.ttf");
+
+/**
+ * Membagi kata menjadi tepat `lineCount` baris dengan lebar baris paling seimbang.
+ * @returns {{groups: Array<Array<string>>, maxWidthEm: number}|null}
+ */
+function splitBalancedWords(words, prefix, spaceEm, lineCount) {
+	const total = words.length;
+	const lineWidthEm = (start, end) => prefix[end] - prefix[start] + spaceEm * (end - start - 1);
+
+	let previous = new Array(total + 1).fill(Number.POSITIVE_INFINITY);
+	let previousMax = new Array(total + 1).fill(0);
+	const backtracks = [];
+	previous[0] = 0;
+
+	for (let k = 1; k <= lineCount; k++) {
+		const current = new Array(total + 1).fill(Number.POSITIVE_INFINITY);
+		const currentMax = new Array(total + 1).fill(0);
+		const cut = new Array(total + 1).fill(-1);
+
+		for (let end = k; end <= total; end++) {
+			for (let start = k - 1; start < end; start++) {
+				if (previous[start] === Number.POSITIVE_INFINITY) continue;
+				const width = lineWidthEm(start, end);
+				const cost = previous[start] + width * width;
+				if (cost < current[end] - 1e-9) {
+					current[end] = cost;
+					currentMax[end] = Math.max(previousMax[start], width);
+					cut[end] = start;
+				}
+			}
+		}
+
+		backtracks.push(cut);
+		previous = current;
+		previousMax = currentMax;
+	}
+
+	const maxWidthEm = previousMax[total];
+	if (!Number.isFinite(maxWidthEm)) return null;
+
+	const groups = [];
+	let end = total;
+	for (let k = lineCount; k >= 1; k--) {
+		const start = backtracks[k - 1][end];
+		groups.push(words.slice(start, end));
+		end = start;
+	}
+	groups.reverse();
+
+	return { groups, maxWidthEm };
+}
+
+/**
+ * Menata satu bagian teks meme (atas/bawah) dengan font Impact sebesar mungkin
+ * yang masih muat di lebar kanvas dan batas tinggi slot.
+ */
+function planMemeSlot(font, rawText, slotMaxH) {
+	if (!rawText || !rawText.trim()) return null;
+
+	const cleaned = [...String(rawText).toUpperCase()]
+		.filter((char) => /\s/.test(char) || font.hasGlyph(char))
+		.join("");
+
+	const manualLines = cleaned
+		.split("\n")
+		.map((line) => line.replace(/\s+/g, " ").trim())
+		.filter(Boolean);
+
+	if (manualLines.length === 0) return null;
+
+	const sizeFor = (lineCount, maxWidthEm) => {
+		const fitW = MEME_CONTENT_W / Math.max(0.5, maxWidthEm + 0.22);
+		const fitH = slotMaxH / (lineCount * 1.004 + (lineCount - 1) * 0.05);
+		return Math.max(MEME_MIN_FONT, Math.min(MEME_MAX_FONT, Math.round(Math.min(fitW, fitH))));
+	};
+
+	let lines;
+	let fontSize;
+
+	if (manualLines.length > 1) {
+		lines = manualLines;
+		const maxWidthEm = Math.max(...lines.map((line) => font.measureEm(line)));
+		fontSize = sizeFor(lines.length, maxWidthEm);
+	} else {
+		const words = manualLines[0].split(" ");
+		const spaceEm = font.advanceEm(" ");
+		const prefix = new Array(words.length + 1).fill(0);
+		for (let i = 0; i < words.length; i++) prefix[i + 1] = prefix[i] + font.measureEm(words[i]);
+
+		let best = null;
+		const maxLines = Math.min(words.length, 4);
+		for (let count = 1; count <= maxLines; count++) {
+			const split = splitBalancedWords(words, prefix, spaceEm, count);
+			if (!split) continue;
+			const fs = sizeFor(count, split.maxWidthEm);
+			// Pertahankan 1 baris kecuali memecah baris membuat huruf jauh lebih besar (>18% atau 1 baris <64px)
+			if (!best || fs > best.fontSize * 1.18 || (best.fontSize < 64 && fs > best.fontSize + 1)) {
+				best = { lines: split.groups.map((group) => group.join(" ")), fontSize: fs };
+			}
+		}
+
+		lines = best.lines;
+		fontSize = best.fontSize;
+	}
+
+	const border = Math.max(4, Math.min(10, Math.round(fontSize * 0.095)));
+	const inkH = Math.round(fontSize * MEME_INK_HEIGHT_EM);
+	const lineVisualH = inkH + border * 2;
+	const lineGap = Math.max(4, Math.round(fontSize * 0.05));
+	const lineStep = lineVisualH + lineGap;
+	const totalH = lines.length * lineVisualH + (lines.length - 1) * lineGap;
+
+	return { lines, fontSize, border, lineStep, totalH };
+}
+
 /**
  * Membuat stiker meme dengan teks atas dan bawah menggunakan FFmpeg
  * @param {Buffer} inputBuffer - Buffer gambar (PNG/JPG)
@@ -203,191 +336,472 @@ async function addExif(webpBuffer, packname = "AutoBot Sticker", author = "Whisk
  */
 async function createMemeSticker(inputBuffer, topText = "", bottomText = "") {
 	const tmpDir = os.tmpdir();
-	const inputPath = path.join(tmpDir, `smeme_in_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
-	const outputPath = path.join(tmpDir, `smeme_out_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+	const id = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+	const inputPath = path.join(tmpDir, `smeme_in_${id}.png`);
+	const outputPath = path.join(tmpDir, `smeme_out_${id}.webp`);
+	const textDir = path.join(tmpDir, `smeme_txt_${id}`);
 
 	try {
 		await fs.promises.writeFile(inputPath, inputBuffer);
+		await fs.promises.mkdir(textDir, { recursive: true });
 
-		const fontFile = path.resolve(__dirname, "../assets/impact.ttf").replace(/\\/g, "/").replace(":", "\\:");
+		const font = loadFont(MEME_FONT);
+		const hasTop = Boolean(topText && topText.trim());
+		const hasBottom = Boolean(bottomText && bottomText.trim());
+		const slotMaxH = hasTop && hasBottom ? 195 : 225;
 
-		function wrapText(str, maxChars = 20) {
-			if (!str) return "";
-			const words = str.trim().split(/\s+/);
-			const lines = [];
-			let currentLine = "";
-			for (const word of words) {
-				if ((currentLine + " " + word).trim().length <= maxChars) {
-					currentLine = (currentLine + " " + word).trim();
-				} else {
-					if (currentLine) lines.push(currentLine);
-					currentLine = word;
-				}
-			}
-			if (currentLine) lines.push(currentLine);
-			return lines.join("\n");
-		}
-
-		function escapeDrawText(text) {
-			return text
-				.replace(/\\/g, "\\\\")
-				.replace(/'/g, "\\'")
-				.replace(/:/g, "\\:")
-				.replace(/%/g, "%%");
-		}
+		const topSlot = planMemeSlot(font, topText, slotMaxH);
+		const bottomSlot = planMemeSlot(font, bottomText, slotMaxH);
 
 		const filters = [
 			"scale=512:512:force_original_aspect_ratio=increase:flags=lanczos,crop=512:512",
 		];
+		const fontOption = `fontfile='${escapeFilterPath(MEME_FONT)}'`;
 
-		function getFontSettings(str) {
-			const len = str.length;
-			if (len <= 10) return { size: 60, border: 6, wrap: 12 };
-			if (len <= 20) return { size: 52, border: 5, wrap: 15 };
-			if (len <= 35) return { size: 44, border: 4, wrap: 18 };
-			return { size: 38, border: 4, wrap: 22 };
+		let lineIdx = 0;
+		const pushSlotLines = async (slot, startY) => {
+			for (let i = 0; i < slot.lines.length; i++) {
+				const lineFile = path.join(textDir, `l${lineIdx++}.txt`);
+				await fs.promises.writeFile(lineFile, slot.lines[i], "utf8");
+				const y = Math.round(startY + slot.border + i * slot.lineStep);
+				filters.push(
+					`drawtext=${fontOption}:textfile='${escapeFilterPath(lineFile)}':expansion=none:fontcolor=white:bordercolor=black:borderw=${slot.border}:fontsize=${slot.fontSize}:x=(w-text_w)/2:y=${y}`
+				);
+			}
+		};
+
+		if (topSlot) {
+			await pushSlotLines(topSlot, MEME_PADDING_Y);
+		}
+		if (bottomSlot) {
+			await pushSlotLines(bottomSlot, MEME_CANVAS - MEME_PADDING_Y - bottomSlot.totalH);
 		}
 
-		if (topText && topText.trim()) {
-			const settings = getFontSettings(topText.trim());
-			const cleanTop = escapeDrawText(wrapText(topText.trim().toUpperCase(), settings.wrap));
-			filters.push(
-				`drawtext=fontfile='${fontFile}':text='${cleanTop}':fontcolor=white:bordercolor=black:borderw=${settings.border}:fontsize=${settings.size}:line_spacing=4:x=(w-text_w)/2:y=15`
-			);
-		}
-
-		if (bottomText && bottomText.trim()) {
-			const settings = getFontSettings(bottomText.trim());
-			const cleanBottom = escapeDrawText(wrapText(bottomText.trim().toUpperCase(), settings.wrap));
-			filters.push(
-				`drawtext=fontfile='${fontFile}':text='${cleanBottom}':fontcolor=white:bordercolor=black:borderw=${settings.border}:fontsize=${settings.size}:line_spacing=4:x=(w-text_w)/2:y=h-text_h-15`
-			);
-		}
 		await runFfmpeg(["-y", "-i", inputPath, "-vf", filters.join(","), outputPath]);
 
-		const result = await fs.promises.readFile(outputPath);
-		return result;
+		return await fs.promises.readFile(outputPath);
 	} finally {
 		if (fs.existsSync(inputPath)) await fs.promises.unlink(inputPath).catch(() => {});
 		if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath).catch(() => {});
+		await fs.promises.rm(textDir, { recursive: true, force: true }).catch(() => {});
 	}
 }
 /**
- * Membuat stiker teks Brat (latar putih, huruf kecil hitam blur khas tren meme)
+ * Batas kanvas stiker brat, font, dan aturan tata letaknya.
+ */
+const BRAT_CANVAS = 512;
+const BRAT_PADDING_X = 28;
+const BRAT_PADDING_Y = 30;
+const BRAT_CONTENT_W = BRAT_CANVAS - BRAT_PADDING_X * 2;
+const BRAT_CONTENT_H = BRAT_CANVAS - BRAT_PADDING_Y * 2;
+const BRAT_LINE_PITCH_EM = 1.0; // jarak antar baris (1 em)
+const BRAT_MIN_SQUEEZE = 0.82; // kondensasi horizontal maksimal agar teks tetap terbaca
+const BRAT_MAX_LINES = 30;
+const BRAT_MIN_FONT_SIZE = 12;
+const BRAT_MAX_FONT_SIZE = 480;
+const BRAT_BLUR_SIGMA = 3; // tingkat blur teks (piksel pada kanvas 512)
+const BRAT_TEXT_FONT = path.resolve(__dirname, "../assets/arial.ttf");
+
+// Emoji digambar sebagai PNG berwarna (FFmpeg hanya bisa menggambar outline font emoji,
+// hasilnya hitam-putih), ukurannya mengikuti skala font yang sedang dipakai.
+const BRAT_EMOJI_HEIGHT_EM = 0.95; // tinggi tinta emoji
+const BRAT_EMOJI_MAX_WIDTH_EM = 1.15; // batas lebar tinta emoji (mis. bendera)
+const BRAT_EMOJI_GAP_EM = 0.1; // jarak antar emoji
+const BRAT_EMOJI_CENTER_EM = 0.26; // pusat tinta emoji terhadap baseline
+const BRAT_EMOJI_FALLBACK_EM = 0.9; // dipakai bila ukuran tinta gagal diukur
+const emojiInkCache = new Map();
+const BRAT_TEXT_VARIATION = /\uFE0E/g;
+const BRAT_EMOJI_PATTERN = /\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u2600-\u27BF]|\u20E3/u;
+
+const graphemeSegmenter =
+	typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter("en", { granularity: "grapheme" }) : null;
+
+/**
+ * Mengukur kotak tinta (bagian bergambar) sebuah PNG emoji.
+ * @returns {Promise<{x: number, y: number, w: number, h: number}|null>}
+ */
+function probeEmojiInk(filePath) {
+	if (emojiInkCache.has(filePath)) return Promise.resolve(emojiInkCache.get(filePath));
+
+	return new Promise((resolve) => {
+		const ffmpeg = spawn("ffmpeg", [
+			"-hide_banner",
+			"-i", filePath,
+			"-vf", "format=rgba,alphaextract,bbox=min_val=16",
+			"-frames:v", "1",
+			"-f", "null", "-",
+		]);
+
+		let stderr = "";
+		const finish = (result) => {
+			emojiInkCache.set(filePath, result);
+			resolve(result);
+		};
+
+		ffmpeg.stderr.on("data", (data) => {
+			stderr += data.toString();
+		});
+		ffmpeg.on("error", () => finish(null));
+		ffmpeg.on("close", () => {
+			const match = stderr.match(/x1:(\d+)\s+x2:(\d+)\s+y1:(\d+)\s+y2:(\d+)/);
+			if (!match) return finish(null);
+			const [x1, x2, y1, y2] = match.slice(1).map(Number);
+			if (x2 <= x1 || y2 <= y1) return finish(null);
+			finish({ x: x1, y: y1, w: x2 - x1 + 1, h: y2 - y1 + 1 });
+		});
+	});
+}
+
+/** Memecah teks menjadi satu karakter utuh (emoji gabungan tetap satu bagian). */
+function tokenize(text) {
+	if (graphemeSegmenter) {
+		return Array.from(graphemeSegmenter.segment(text), (part) => part.segment);
+	}
+	return [...text];
+}
+
+/**
+ * Menggabungkan font teks dan daftar emoji berwarna menjadi satu objek metrik,
+ * sehingga tata letak bisa menghitung lebar/tinggi tanpa peduli jenis karakternya.
+ * @param {Map<string, string>} emojiAssets - token emoji → path PNG
+ */
+function createBratTypography(emojiAssets) {
+	const textFont = loadFont(BRAT_TEXT_FONT);
+
+	const isEmoji = (token) => emojiAssets.has(token);
+	const isText = (token) => [...token].every((char) => /\s/.test(char) || textFont.hasGlyph(char));
+
+	return {
+		isEmoji,
+		isText,
+		textFonts: () => textFont,
+		assetOf: (token) => emojiAssets.get(token),
+		advanceEm(token) {
+			if (isEmoji(token)) return emojiAssets.get(token).advanceEm;
+
+			let total = 0;
+			for (const char of token) {
+				if (textFont.hasGlyph(char)) total += textFont.advanceEm(char);
+			}
+			return total;
+		},
+		advancePx(token, fontSize) {
+			if (isEmoji(token)) return Math.round(emojiAssets.get(token).advanceEm * fontSize);
+
+			let total = 0;
+			for (const char of token) {
+				if (textFont.hasGlyph(char)) total += textFont.advancePx(char, fontSize);
+			}
+			return total;
+		},
+		measureEm(text) {
+			let total = 0;
+			for (const token of tokenize(text)) total += this.advanceEm(token);
+			return total;
+		},
+		measurePx(text, fontSize) {
+			let total = 0;
+			for (const token of tokenize(text)) total += this.advancePx(token, fontSize);
+			return total;
+		},
+		inkOf(text) {
+			let ascent = 0;
+			let descent = 0;
+
+			for (const token of tokenize(text)) {
+				if (isEmoji(token)) {
+					// Emoji dipusatkan pada tinggi huruf kecil, sama seperti saat digambar
+					const height = emojiAssets.get(token).heightEm;
+					const emojiAscent = BRAT_EMOJI_CENTER_EM + height / 2;
+					const emojiDescent = Math.max(0, height / 2 - BRAT_EMOJI_CENTER_EM);
+					if (emojiAscent > ascent) ascent = emojiAscent;
+					if (emojiDescent > descent) descent = emojiDescent;
+					continue;
+				}
+
+				for (const char of token) {
+					if (!textFont.hasGlyph(char)) continue;
+					const box = textFont.inkEm(char);
+					if (box.ascent > ascent) ascent = box.ascent;
+					if (box.descent > descent) descent = box.descent;
+				}
+			}
+
+			return { ascent, descent };
+		},
+	};
+}
+
+/**
+ * Mencari pembagian baris paling seimbang untuk tiap jumlah baris,
+ * lalu memilih jumlah baris yang menghasilkan huruf terbesar.
+ * @returns {{lines: Array<Array<string>>, maxWidthEm: number, fontSize: number}}
+ */
+function planBratLines(typo, words) {
+	const total = words.length;
+	const spaceEm = typo.advanceEm(" ");
+	const prefix = new Array(total + 1).fill(0);
+	for (let i = 0; i < total; i++) prefix[i + 1] = prefix[i] + typo.measureEm(words[i]);
+
+	const lineWidthEm = (start, end) => prefix[end] - prefix[start] + spaceEm * (end - start - 1);
+
+	let best = null;
+	const limit = Math.min(total, BRAT_MAX_LINES);
+
+	for (let lines = 1; lines <= limit; lines++) {
+		const split = splitBalancedWords(words, prefix, spaceEm, lines);
+		if (!split) continue;
+
+		const { groups, maxWidthEm } = split;
+		const fontSize = Math.min(
+			BRAT_CONTENT_H / ((lines - 1) * BRAT_LINE_PITCH_EM + blockInkEm(typo, words)),
+			BRAT_CONTENT_W / maxWidthEm / BRAT_MIN_SQUEEZE
+		);
+
+		if (!best || fontSize > best.fontSize + 0.01) {
+			best = { lines: groups, maxWidthEm, fontSize };
+		}
+	}
+
+	return best;
+}
+
+/** Tinggi tinta total (ascent + descent) dari seluruh teks dalam em. */
+function blockInkEm(typo, words) {
+	let ascent = 0;
+	let descent = 0;
+	for (const word of words) {
+		const ink = typo.inkOf(word);
+		if (ink.ascent > ascent) ascent = ink.ascent;
+		if (ink.descent > descent) descent = ink.descent;
+	}
+	return Math.max(0.6, ascent + descent);
+}
+
+/**
+ * Menyiapkan aset emoji berwarna beserta ukuran tinta aslinya.
+ * @returns {Promise<Map<string, {path: string, box: Object|null, widthEm: number, heightEm: number, advanceEm: number}>>}
+ */
+async function collectEmojiAssets(tokens) {
+	const unique = [...new Set(tokens)];
+	const assets = new Map();
+
+	await Promise.all(
+		unique.map(async (token) => {
+			const filePath = await getEmojiAssetPath(token).catch(() => null);
+			if (!filePath) return;
+
+			const box = await probeEmojiInk(filePath);
+
+			let widthEm = BRAT_EMOJI_FALLBACK_EM;
+			let heightEm = BRAT_EMOJI_FALLBACK_EM;
+
+			if (box) {
+				const aspect = box.w / box.h;
+				if (aspect > BRAT_EMOJI_MAX_WIDTH_EM / BRAT_EMOJI_HEIGHT_EM) {
+					widthEm = BRAT_EMOJI_MAX_WIDTH_EM;
+					heightEm = widthEm / aspect;
+				} else {
+					heightEm = BRAT_EMOJI_HEIGHT_EM;
+					widthEm = heightEm * aspect;
+				}
+			}
+
+			assets.set(token, { path: filePath, box, widthEm, heightEm, advanceEm: widthEm + BRAT_EMOJI_GAP_EM });
+		})
+	);
+
+	return assets;
+}
+
+/**
+ * Membuat stiker teks Brat (latar putih, teks hitam besar rata kanan-kiri, emoji berwarna, blur).
  * @param {string} text - Teks brat
  * @returns {Promise<Buffer>} - Buffer WebP stiker 512x512
  */
 async function createBratSticker(text) {
-	const clean = text.trim();
+	const prepared = String(text).replace(BRAT_TEXT_VARIATION, "");
+	const baseFont = loadFont(BRAT_TEXT_FONT);
+	const rawTokens = tokenize(prepared);
+
+	// Emoji (yang tidak ada di font teks) diambil dulu sebagai gambar berwarna Apple/iPhone
+	const emojiCandidates = rawTokens.filter(
+		(token) =>
+			BRAT_EMOJI_PATTERN.test(token) && ![...token].every((char) => baseFont.hasGlyph(char))
+	);
+	const emojiAssets = await collectEmojiAssets(emojiCandidates);
+
+	const typo = createBratTypography(emojiAssets);
+
+	// Sisakan hanya karakter yang bisa digambar: teks (di-lowercase), emoji yang asetnya tersedia
+	const kept = rawTokens
+		.map((token) => (typo.isEmoji(token) ? token : token.toLowerCase()))
+		.filter((token) => /\s/.test(token) || typo.isText(token) || typo.isEmoji(token));
+
+	const forcedLines = kept
+		.join("")
+		.split("\n")
+		.map((line) => line.replace(/\s+/g, " ").trim())
+		.filter(Boolean);
+
+	if (forcedLines.length === 0) {
+		throw new Error("Teks brat tidak berisi huruf yang didukung font");
+	}
+
+	const words = forcedLines.flatMap((line) => line.split(" "));
+	const inkTotalEm = blockInkEm(typo, words);
+
+	// Tentukan pembagian baris: hormati enter manual, selain itu cari yang paling besar
+	const planned =
+		forcedLines.length > 1
+			? {
+					lines: forcedLines.map((line) => line.split(" ")),
+					maxWidthEm: Math.max(...forcedLines.map((line) => typo.measureEm(line))),
+			  }
+			: planBratLines(typo, words);
+
+	const lines = planned.lines;
+	const inkAscentEm = Math.max(...words.map((word) => typo.inkOf(word).ascent));
+
+	// Ukuran font: penuhi tinggi kanvas, jangan sampai melebar keluar batas horizontal
+	const fitHeight = BRAT_CONTENT_H / ((lines.length - 1) * BRAT_LINE_PITCH_EM + inkTotalEm);
+	const fitWidth = BRAT_CONTENT_W / planned.maxWidthEm;
+	const fontSize = Math.max(
+		BRAT_MIN_FONT_SIZE,
+		Math.min(BRAT_MAX_FONT_SIZE, Math.round(Math.min(fitHeight, fitWidth / BRAT_MIN_SQUEEZE)))
+	);
+
+	const spacePx = typo.advancePx(" ", fontSize);
+	const widthCache = new Map();
+	const wordWidth = (word) => {
+		if (!widthCache.has(word)) widthCache.set(word, typo.measurePx(word, fontSize));
+		return widthCache.get(word);
+	};
+
+	const lineWidths = lines.map(
+		(line) => line.reduce((sum, word) => sum + wordWidth(word), 0) + spacePx * (line.length - 1)
+	);
+	const widestLine = Math.max(...lineWidths);
+
+	// Bila teks terlalu lebar, kondensasi horizontal (mirip font condensed) lalu ratakan
+	const squeeze = Math.max(0.6, Math.min(1, BRAT_CONTENT_W / widestLine));
+	const canvasWidth = Math.round(BRAT_CANVAS / squeeze);
+	const scaleX = BRAT_CANVAS / canvasWidth;
+	const contentWidth = BRAT_CONTENT_W / scaleX;
+	const marginX = BRAT_PADDING_X / scaleX;
+
+	// Posisi vertikal: semua baris & potongan kata memakai baseline yang sama
+	const pitch = fontSize * BRAT_LINE_PITCH_EM;
+	const inkTop = (BRAT_CANVAS - ((lines.length - 1) * pitch + inkTotalEm * fontSize)) / 2;
+	const firstBaseline = inkTop + inkAscentEm * fontSize;
+
 	const tmpDir = os.tmpdir();
 	const outputPath = path.join(tmpDir, `brat_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+	const textDir = path.join(tmpDir, `brat_txt_${Date.now()}_${Math.random().toString(36).substring(7)}`);
 
 	try {
-		const fontFile = path.resolve(__dirname, "../assets/arial.ttf").replace(/\\/g, "/").replace(":", "\\:");
+		await fs.promises.mkdir(textDir, { recursive: true });
 
-		function formatBratLines(str) {
-			if (str.includes("\n")) {
-				return str.split("\n").map((l) => l.trim().toLowerCase()).filter(Boolean);
-			}
+		const textFiles = new Map();
+		const writeTextFile = async (content) => {
+			if (textFiles.has(content)) return textFiles.get(content);
+			const file = path.join(textDir, `t${textFiles.size}.txt`);
+			await fs.promises.writeFile(file, content, "utf8");
+			textFiles.set(content, file);
+			return file;
+		};
 
-			const words = str.trim().toLowerCase().split(/\s+/);
-			if (words.length <= 1) return [words[0] || ""];
-			if (words.length === 2) {
-				return [words[0], words[1]];
-			}
-			if (words.length === 3) {
-				const lA = [words.slice(0, 2).join(" "), words[2]];
-				const lB = [words[0], words[1], words[2]];
-				const maxA = Math.max(...lA.map((l) => l.length));
-				const maxB = Math.max(...lB.map((l) => l.length));
-				const sA = Math.min(485 / (maxA * 0.45), 475 / (2 * 1.2));
-				const sB = Math.min(485 / (maxB * 0.45), 475 / (3 * 1.2));
-				return sB * 3 >= sA * 2 ? lB : lA;
-			}
-			if (words.length === 4) {
-				const lA = [words.slice(0, 2).join(" "), words.slice(2).join(" ")];
-				const lB = [words[0], words.slice(1, 3).join(" "), words[3]];
-				const maxA = Math.max(...lA.map((l) => l.length));
-				const maxB = Math.max(...lB.map((l) => l.length));
-				const sA = Math.min(485 / (maxA * 0.45), 475 / (2 * 1.2));
-				const sB = Math.min(485 / (maxB * 0.45), 475 / (3 * 1.2));
-				return sB * 3 >= sA * 2 ? lB : lA;
-			}
-			if (words.length === 5) {
-				return [words.slice(0, 2).join(" "), words.slice(2, 4).join(" "), words[4]];
-			}
+		const draws = [];
+		const overlays = [];
 
-			const lines = [];
-			let curWords = [];
-			for (const w of words) {
-				const cand = [...curWords, w].join(" ");
-				if (curWords.length < 2 && cand.length <= 10) {
-					curWords.push(w);
-				} else {
-					if (curWords.length > 0) lines.push(curWords.join(" "));
-					curWords = [w];
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const lineWidth = line.reduce((sum, word) => sum + wordWidth(word), 0);
+			const gap = line.length > 1 ? Math.max(0, (contentWidth - lineWidth) / (line.length - 1)) : 0;
+			const baseline = firstBaseline + i * pitch;
+
+			let penX = marginX;
+			for (const word of line) {
+				let textRun = "";
+
+				const flushRun = async () => {
+					if (!textRun) return;
+					const file = await writeTextFile(textRun);
+					// drawtext menempelkan y ke puncak tinta teks, jadi tinggi tiap potongan
+					// dihitung sendiri agar baseline semua potongan sejajar
+					const y = Math.round(baseline - typo.inkOf(textRun).ascent * fontSize);
+					draws.push(
+						`drawtext=fontfile='${escapeFilterPath(BRAT_TEXT_FONT)}':textfile='${escapeFilterPath(file)}':expansion=none:fontcolor=black:fontsize=${fontSize}:x=${Math.round(penX)}:y=${y}`
+					);
+					penX += typo.measurePx(textRun, fontSize);
+					textRun = "";
+				};
+
+				for (const token of tokenize(word)) {
+					if (typo.isEmoji(token)) {
+						await flushRun();
+						const asset = typo.assetOf(token);
+						const advance = typo.advancePx(token, fontSize);
+						const width = Math.max(1, Math.round(asset.widthEm * fontSize));
+						const height = Math.max(1, Math.round(asset.heightEm * fontSize));
+
+						overlays.push({
+							path: asset.path,
+							box: asset.box,
+							x: Math.round(penX + (advance - width) / 2),
+							// Emoji dipusatkan pada tinggi huruf kecil agar sejajar dengan teks
+							y: Math.round(baseline - fontSize * BRAT_EMOJI_CENTER_EM - height / 2),
+							width,
+							height,
+						});
+						penX += advance;
+					} else {
+						textRun += token;
+					}
 				}
+
+				await flushRun();
+				penX += gap;
 			}
-			if (curWords.length > 0) lines.push(curWords.join(" "));
-			return lines;
 		}
 
-		function estimateLineWidth(line) {
-			let w = 0;
-			for (const ch of line) {
-				if ("mwMW".includes(ch)) w += 0.85;
-				else if ("iltjfr .,:;!|/".includes(ch)) w += 0.32;
-				else if (ch >= "A" && ch <= "Z") w += 0.72;
-				else w += 0.60;
-			}
-			return w;
-		}
+		// Susun filter: teks → tempel emoji berwarna → skala ke 512 → blur
+		const graph = [`[0:v]${draws.length ? draws.join(",") : "null"}[base]`];
+		let previous = "base";
 
-		function calculateBratFontSize(lines) {
-			const maxWeightedWidth = Math.max(...lines.map((l) => estimateLineWidth(l)));
-			const numLines = lines.length;
+		overlays.forEach((overlay, index) => {
+			const crop = overlay.box
+				? `crop=${overlay.box.w}:${overlay.box.h}:${overlay.box.x}:${overlay.box.y},`
+				: "";
+			graph.push(
+				`[${index + 1}:v]${crop}scale=${overlay.width}:${overlay.height}:flags=lanczos,format=rgba[ov${index}]`
+			);
+			graph.push(`[${previous}][ov${index}]overlay=x=${overlay.x}:y=${overlay.y}:format=auto[b${index}]`);
+			previous = `b${index}`;
+		});
 
-			// Batas kanvas 512px (margin kiri x=20, aman sisi kanan ~25px => batas 465px)
-			const sizeFromWidth = 465 / maxWeightedWidth;
-			// Batas tinggi kanvas ~460px
-			const sizeFromHeight = 460 / (numLines * 1.25);
+		graph.push(
+			`[${previous}]scale=${BRAT_CANVAS}:${BRAT_CANVAS}:flags=lanczos,gblur=sigma=${BRAT_BLUR_SIGMA}:steps=2[out]`
+		);
 
-			let optimalSize = Math.floor(Math.min(sizeFromWidth, sizeFromHeight));
-			return Math.max(34, Math.min(160, optimalSize));
-		}
-
-		function escapeDrawText(str) {
-			return str
-				.replace(/\\/g, "\\\\")
-				.replace(/'/g, "\\'")
-				.replace(/:/g, "\\:")
-				.replace(/%/g, "%%");
-		}
-
-		const lines = formatBratLines(clean);
-		const fontSize = calculateBratFontSize(lines);
-		const lineSpacing = Math.max(8, Math.floor(fontSize * 0.12));
-		const formattedText = escapeDrawText(lines.join("\n"));
-
-		const filter = [
-			"scale=512:512",
-			`drawtext=fontfile='${fontFile}':text='${formattedText}':fontcolor=black:fontsize=${fontSize}:line_spacing=${lineSpacing}:x=20:y=(h-text_h)/2:fix_bounds=1`,
-			"gblur=sigma=3.0:steps=2",
-		].join(",");
-
-		await runFfmpeg([
-			"-y",
-			"-f", "lavfi",
-			"-i", "color=c=white:s=512x512",
-			"-vf", filter,
+		const args = ["-y", "-f", "lavfi", "-i", `color=c=white:s=${canvasWidth}x${BRAT_CANVAS}`];
+		for (const overlay of overlays) args.push("-i", overlay.path);
+		args.push(
+			"-filter_complex", graph.join(";"),
+			"-map", "[out]",
 			"-frames:v", "1",
-			outputPath,
-		]);
+			"-c:v", "libwebp",
+			"-quality", "92",
+			"-compression_level", "6",
+			outputPath
+		);
 
-		const result = await fs.promises.readFile(outputPath);
-		return result;
+		await runFfmpeg(args);
+
+		return await fs.promises.readFile(outputPath);
 	} finally {
 		if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath).catch(() => {});
+		await fs.promises.rm(textDir, { recursive: true, force: true }).catch(() => {});
 	}
 }
 
