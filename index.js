@@ -69,6 +69,9 @@ function releaseLock() {
 /**
  * Inisialisasi dan menghubungkan bot WhatsApp menggunakan Whiskeysockets Baileys
  */
+const MAX_CACHED_MESSAGES = 500;
+const GROUP_META_TTL_MS = 60 * 1000;
+
 async function startBot() {
   console.log('\n======================================================');
   console.log(`🚀 Memulai ${config.botName}...`);
@@ -85,18 +88,62 @@ async function startBot() {
   // Manajemen otentikasi multi-file (session tersimpan di folder ./session)
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
+  // Cache pesan terkirim/masuk agar Baileys bisa merespon retry request enkripsi (mencegah pesan macet "mengetik...")
+  const msgStore = new Map();
+  const rememberMessage = (id, message) => {
+    if (!id || !message) return;
+    if (!msgStore.has(id) && msgStore.size >= MAX_CACHED_MESSAGES) {
+      const oldest = msgStore.keys().next().value;
+      if (oldest) msgStore.delete(oldest);
+    }
+    msgStore.set(id, message);
+  };
+
+  const groupMetaCache = new Map();
+  const getCachedGroupMeta = (jid) => {
+    const entry = groupMetaCache.get(jid);
+    if (!entry) return undefined;
+    if (Date.now() - entry.ts > GROUP_META_TTL_MS) {
+      groupMetaCache.delete(jid);
+      return undefined;
+    }
+    return entry.data;
+  };
+
   // Buat socket koneksi Baileys
   const sock = makeWASocket({
     version,
-    logger: pino({ level: 'silent' }), // Ganti ke 'info' jika ingin melihat raw network logs
+    logger: pino({ level: 'error' }),
     auth: state,
     browser: Browsers.ubuntu('Chrome'),
     syncFullHistory: false,
     generateHighQualityLinkPreview: true,
     connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 25000
+    keepAliveIntervalMs: 25000,
+    getMessage: async (key) => (key?.id ? msgStore.get(key.id) : undefined),
+    cachedGroupMetadata: async (jid) => getCachedGroupMeta(jid),
   });
 
+  // Simpan setiap pesan keluar seketika agar langsung tersedia bila penerima mengirim retry receipt
+  const origSendMessage = sock.sendMessage.bind(sock);
+  sock.sendMessage = async (jid, content, options = {}) => {
+    const fullMsg = await origSendMessage(jid, content, options);
+    if (fullMsg?.key?.id && fullMsg?.message) {
+      rememberMessage(fullMsg.key.id, fullMsg.message);
+    }
+    return fullMsg;
+  };
+
+  const origGroupMetadata = sock.groupMetadata.bind(sock);
+  sock.groupMetadata = async (jid) => {
+    const cached = getCachedGroupMeta(jid);
+    if (cached) return cached;
+    const fresh = await origGroupMetadata(jid);
+    if (fresh) {
+      groupMetaCache.set(jid, { data: fresh, ts: Date.now() });
+    }
+    return fresh;
+  };
   // Login via Pairing Code (diajukan otomatis saat sesi belum terdaftar)
   if (!sock.authState.creds.registered) {
     const cleanNumber = config.pairingNumber.replace(/[^0-9]/g, '');
@@ -163,8 +210,33 @@ async function startBot() {
   // Event Simpan Kredensial Sesi Otomatis
   sock.ev.on('creds.update', saveCreds);
 
+  // Invalidasi cache metadata grup bila ada perubahan anggota/info grup
+  sock.ev.on('groups.update', (updates) => {
+    for (const u of updates) {
+      if (u?.id) groupMetaCache.delete(u.id);
+    }
+  });
+  sock.ev.on('group-participants.update', ({ id }) => {
+    if (id) groupMetaCache.delete(id);
+  });
+
+  // Laporkan jika WhatsApp server menolak pesan yang dikirim bot
+  sock.ev.on('messages.update', (updates) => {
+    for (const { key, update } of updates) {
+      if (update?.status === 0 && key?.fromMe) {
+        console.warn(`[WA] Pengiriman pesan gagal/ditolak (${key.remoteJid}):`, update.messageStubParameters || 'error ack');
+      }
+    }
+  });
+
   // Event Pesan Masuk
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    for (const msg of messages) {
+      if (msg?.key?.id && msg?.message) {
+        rememberMessage(msg.key.id, msg.message);
+      }
+    }
+
     if (type !== 'notify') return;
 
     for (const msg of messages) {

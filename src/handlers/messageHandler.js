@@ -360,8 +360,14 @@ async function handleMessage(sock, m) {
 					const aiPreview = (aiReply.length > 70 ? aiReply.slice(0, 70) + "…" : aiReply).replace(/\n/g, `\n${color.cyan}`);
 					console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  Membalas ${color.bold}[${pushName}]${color.reset}: ${color.cyan}"${aiPreview}"${color.reset}`);
 				} catch (err) {
-					console.error("[AI] Error generateReply AI:", err.message);
-					await reply("Maaf, AI sedang gangguan. Coba lagi nanti.");
+					console.error("[AI] Error saat memproses/mengirim balasan AI:", err.message);
+					await reply("Maaf, AI sedang gangguan. Coba lagi nanti.").catch(() => {});
+				} finally {
+					try {
+						await sock.sendPresenceUpdate("paused", from);
+					} catch (e) {
+						// Abaikan gagal update presence
+					}
 				}
 			}
 			return;
