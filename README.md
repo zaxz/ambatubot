@@ -11,6 +11,7 @@ Bot WhatsApp modern dan handal yang dibangun menggunakan library [@whiskeysocket
 * **Video/GIF ke Stiker Bergerak (Animated Sticker)**: Mengubah video pendek atau GIF (maksimal 9 detik) menjadi stiker animasi WhatsApp.
 * **Custom EXIF Metadata**: Mendukung kustomisasi *Pack Name* (nama paket) dan *Author* (nama pembuat) saat stiker diklik di WhatsApp.
 * **Stiker ke Gambar (`.toimg`)**: Mengubah stiker kembali menjadi file foto/gambar PNG.
+* **iPhone Quoted Chat (`.iqc`)**: Membuat gambar quote chat ala WhatsApp iOS (status bar iPhone, header WA blur, reaksi emoji Apple, dan menu konteks outline).
 
 ### 2. ⚡ Otomatisasi Pesan & Auto-Responder
 * **Pencocokan Kata Kunci Fleksibel**:
@@ -21,19 +22,18 @@ Bot WhatsApp modern dan handal yang dibangun menggunakan library [@whiskeysocket
 * **Anti-Spam Cooldown**: Mencegah bot membalas berulang kali dalam jeda waktu singkat jika pengirim melakukan spam pesan serupa.
 * **Simulasi Mengetik (*Typing Presence*)**: Menampilkan status "sedang mengetik..." sebelum membalas agar terlihat natural layaknya manusia.
 
-### 6. 🤖 Balasan AI dengan Personalisasi (Mention)
-* **Pemicu**: Balasan AI aktif ketika bot disebut (*mention*) di grup, atau ketika seseorang membalas pesan milik bot sendiri.
-* **Personalisasi**: AI memanggil nama pengirim dan menyertakan konteks grup (nama grup) dalam prompt, sehingga balasan terasa natural dan relevan.
-* **Provider**: Google Gemini (`gemini-1.5-flash`) melalui REST + `axios` — tidak perlu menginstal paket tambahan.
-* **Pengendalian**: Aktif/nonaktif lewat `config.ai.enabled`, batasi hanya grup lewat `mentionOnlyInGroup`, dan jeda per chat lewat `cooldownMs` (default 10 detik) agar tidak spam.
-* **Kegagalan**: Jika AI sedang gangguan atau kuota habis, bot membalas *"Maaf, AI sedang gangguan. Coba lagi nanti."* sekali dan tetap online.
+### 3. 🤖 Balasan AI Cerdas (Memori, Reply, Vision & Data Kuliah)
+* **Pemicu**: Aktif saat bot di-mention (`@AmbatuBOT`) atau dibalas di grup, maupun langsung di chat pribadi (DM).
+* **Memori & Konteks Reply**: Mengingat hingga 10 pesan terakhir per chat dan membaca isi pesan yang di-reply.
+* **AI Vision**: Mampu membaca gambar atau stiker yang dikirim atau di-reply bersamaan dengan pertanyaan ke AI.
+* **Terhubung ke Data Kuliah**: Menjawab pertanyaan natural seputar jadwal kuliah, dosen, dan PJ matkul berdasarkan database resmi kelas.
+* **Provider**: Google Gemini melalui REST + `axios`, dengan fallback model otomatis.
 
 ### 4. 🔑 Login Pairing Code
 * Bot terhubung via **Pairing Code (8 Digit)** — cocok untuk VPS Linux/Cloud server tanpa perlu memindai kamera ponsel.
 
 ### 5. 💾 Multi-File Auth State
 * Sesi login tersimpan secara lokal di folder `./session`. Bot akan otomatis terhubung kembali saat server di-restart tanpa perlu scan ulang.
-
 ---
 
 ## 📋 Prasyarat Sistem
@@ -99,11 +99,14 @@ npm start
 | `.smeme <atas> \| <bawah>` | Membuat stiker meme dengan teks atas dan bawah | Kirim gambar dengan caption `.smeme KETIKA CODING \| TIBA-TIBA ERROR` |
 | `.brat <teks>` | Membuat stiker teks brat putih: huruf besar rata kanan-kiri, emoji berwarna, efek blur | Kirim `.brat sok iye loe jadi orang 🙏` |
 | `.toimg` | Mengubah stiker menjadi file gambar (PNG) | Reply sebuah stiker dengan `.toimg` |
+| `.iqc <teks>` | Membuat gambar iPhone Quoted Chat (IQC) aesthetic | Kirim `.iqc halo...` / `.iqc aku \| teks` atau reply chat dengan `.iqc` |
 | `.jadwal <kelas> [hari]` | Cek jadwal kuliah IWIMA (hari ini, besok, lusa, semua) | Kirim `.jadwal 3p51 hari ini` atau `.jadwal 3p51 besok` |
 | `.pj <kelas> <matkul>` | Cek Penanggung Jawab (PJ) matkul & kontak WA dosen | Kirim `.pj 3p51 statistik` atau `.pj 3p51 semua` |
 | `.ping` | Mengecek kecepatan respon bot (latensi server) | Kirim `.ping` |
 | `.runtime` | Menampilkan durasi aktif bot dan penggunaan RAM | Kirim `.runtime` |
 | `.listgrup` | Menampilkan daftar grup yang diikuti bot (Khusus Owner) | Kirim `.listgrup` |
+| `.join <link>` | Memasukkan bot ke grup via link undangan WA (Khusus Owner) | Kirim `.join https://chat.whatsapp.com/...` |
+| `.leave [no/id]` | Mengeluarkan bot dari grup saat ini atau berdasar nomor `.listgrup` (Khusus Owner) | Kirim `.leave` atau `.leave 1` |
 
 ---
 

@@ -2,12 +2,102 @@ const { getContentType, jidNormalizedUser } = require("@whiskeysockets/baileys")
 const config = require("../../config");
 const { checkAutoReply } = require("./autoReplyHandler");
 const { generateReply } = require("../utils/aiClient");
+const { downloadMediaBuffer, webpToImage } = require("../utils/mediaHelper");
 const handleCase = require("../case");
 
 const startTime = Date.now();
 // Memory cache untuk rate-limiting AI per chat (agar tidak spam jika disebut berulang)
 const aiCooldownMap = new Map();
+// Memori chat singkat per percakapan agar AI nyambung dengan konteks sebelumnya
+const chatHistoryMap = new Map();
+const MAX_HISTORY_MESSAGES = 10;
+const MAX_HISTORY_CHATS = 100;
+const MAX_HISTORY_AGE_MS = 30 * 60 * 1000;
+const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
+const SUPPORTED_AI_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
+function unwrapMessage(raw) {
+	let cur = raw;
+	while (cur) {
+		if (cur.ephemeralMessage?.message) cur = cur.ephemeralMessage.message;
+		else if (cur.viewOnceMessageV2?.message) cur = cur.viewOnceMessageV2.message;
+		else if (cur.viewOnceMessage?.message) cur = cur.viewOnceMessage.message;
+		else if (cur.documentWithCaptionMessage?.message) cur = cur.documentWithCaptionMessage.message;
+		else break;
+	}
+	return cur;
+}
+
+function extractMessageText(unwrappedMsg, msgType) {
+	if (!unwrappedMsg || !msgType) return "";
+	if (msgType === "conversation") return unwrappedMsg.conversation || "";
+	if (msgType === "extendedTextMessage") return unwrappedMsg.extendedTextMessage?.text || "";
+	if (msgType === "imageMessage") return unwrappedMsg.imageMessage?.caption || "";
+	if (msgType === "videoMessage") return unwrappedMsg.videoMessage?.caption || "";
+	if (msgType === "documentMessage") return unwrappedMsg.documentMessage?.caption || "";
+	return "";
+}
+
+function getChatHistory(chatJid) {
+	const entries = chatHistoryMap.get(chatJid);
+	if (!entries) return [];
+	const cutoff = Date.now() - MAX_HISTORY_AGE_MS;
+	const fresh = entries.filter((e) => e.timestamp >= cutoff);
+	if (fresh.length !== entries.length) {
+		if (fresh.length > 0) chatHistoryMap.set(chatJid, fresh);
+		else chatHistoryMap.delete(chatJid);
+	}
+	return fresh.map(({ role, text }) => ({ role, text }));
+}
+
+function appendChatHistory(chatJid, role, text) {
+	if (!chatJid || !text) return;
+	const cleaned = text.trim().slice(0, 450);
+	if (!cleaned) return;
+
+	if (!chatHistoryMap.has(chatJid) && chatHistoryMap.size >= MAX_HISTORY_CHATS) {
+		const oldestKey = chatHistoryMap.keys().next().value;
+		if (oldestKey) chatHistoryMap.delete(oldestKey);
+	}
+
+	const entries = chatHistoryMap.get(chatJid) || [];
+	entries.push({ role, text: cleaned, timestamp: Date.now() });
+	if (entries.length > MAX_HISTORY_MESSAGES) {
+		entries.splice(0, entries.length - MAX_HISTORY_MESSAGES);
+	}
+	chatHistoryMap.set(chatJid, entries);
+}
+
+function normalizeImageMime(rawMime) {
+	const base = (rawMime || "image/jpeg").split(";")[0].trim().toLowerCase();
+	if (base === "image/jpg") return "image/jpeg";
+	return SUPPORTED_AI_IMAGE_MIMES.has(base) ? base : "image/jpeg";
+}
+
+async function extractAiImage(msg, messageType, quotedMsg, quotedType) {
+	try {
+		if (messageType === "imageMessage" && msg?.imageMessage?.mediaKey) {
+			const buffer = await downloadMediaBuffer(msg.imageMessage, "image");
+			if (buffer.length > 0 && buffer.length <= MAX_AI_IMAGE_BYTES) {
+				return { mimeType: normalizeImageMime(msg.imageMessage.mimetype), data: buffer.toString("base64") };
+			}
+		} else if (quotedType === "imageMessage" && quotedMsg?.imageMessage?.mediaKey) {
+			const buffer = await downloadMediaBuffer(quotedMsg.imageMessage, "image");
+			if (buffer.length > 0 && buffer.length <= MAX_AI_IMAGE_BYTES) {
+				return { mimeType: normalizeImageMime(quotedMsg.imageMessage.mimetype), data: buffer.toString("base64") };
+			}
+		} else if (quotedType === "stickerMessage" && quotedMsg?.stickerMessage?.mediaKey) {
+			const webpBuf = await downloadMediaBuffer(quotedMsg.stickerMessage, "sticker");
+			const pngBuf = await webpToImage(webpBuf);
+			if (pngBuf.length > 0 && pngBuf.length <= MAX_AI_IMAGE_BYTES) {
+				return { mimeType: "image/png", data: pngBuf.toString("base64") };
+			}
+		}
+	} catch (err) {
+		console.warn("[AI] Gagal memuat gambar untuk AI Vision:", err.message);
+	}
+	return null;
+}
 /**
  * Format durasi waktu ke teks terbaca (jam, menit, detik)
  * @param {number} ms
@@ -89,7 +179,6 @@ async function handleMessage(sock, m) {
 		const isGroup = from.endsWith("@g.us");
 		const sender = isGroup ? m.key.participant : from;
 		const pushName = m.pushName || "Sahabat";
-
 		// Identitas bot (JID, LID, dan nomor telepon)
 		const botJid = sock.user?.id ? jidNormalizedUser(sock.user.id) : null;
 		const botLid = sock.user?.lid ? jidNormalizedUser(sock.user.lid) : null;
@@ -115,25 +204,13 @@ async function handleMessage(sock, m) {
 		const isOwner = config.ownerNumbers.some((num) => senderNumbers.includes(num.replace(/[^0-9]/g, "")));
 
 		// Ekstraksi pesan aktual (antisipasi ephemeral & viewOnce wrapper)
-		let msg = m.message;
-		if (msg.ephemeralMessage) msg = msg.ephemeralMessage.message;
-		if (msg.viewOnceMessageV2) msg = msg.viewOnceMessageV2.message;
-		else if (msg.viewOnceMessage) msg = msg.viewOnceMessage.message;
+		let msg = unwrapMessage(m.message);
+		if (!msg) return;
 
 		const messageType = getContentType(msg) || Object.keys(msg)[0];
 
 		// Ekstraksi teks isi pesan
-		let body = "";
-		if (messageType === "conversation") {
-			body = msg.conversation;
-		} else if (messageType === "extendedTextMessage") {
-			body = msg.extendedTextMessage?.text || "";
-		} else if (messageType === "imageMessage") {
-			body = msg.imageMessage?.caption || "";
-		} else if (messageType === "videoMessage") {
-			body = msg.videoMessage?.caption || "";
-		}
-
+		const body = extractMessageText(msg, messageType);
 		const trimmedBody = body.trim();
 		const prefix = config.botPrefix;
 		const isCommand = trimmedBody.startsWith(prefix);
@@ -154,9 +231,9 @@ async function handleMessage(sock, m) {
 
 		// Deteksi konteks pesan kutipan (reply/quote)
 		const contextInfo = msg[messageType]?.contextInfo;
-		const quotedMsg = contextInfo?.quotedMessage;
-		const quotedType = quotedMsg ? Object.keys(quotedMsg)[0] : null;
-
+		const rawQuoted = contextInfo?.quotedMessage;
+		const quotedMsg = rawQuoted ? unwrapMessage(rawQuoted) : null;
+		const quotedType = quotedMsg ? (getContentType(quotedMsg) || Object.keys(quotedMsg)[0]) : null;
 		// Helper untuk membalas pesan dengan quote otomatis
 		const reply = async (text) => {
 			await sock.sendMessage(from, { text }, { quoted: m });
@@ -189,6 +266,8 @@ async function handleMessage(sock, m) {
 				quotedType,
 				reply,
 				startTime,
+				botJid,
+				botLid,
 			});
 			return;
 		}
@@ -222,7 +301,6 @@ async function handleMessage(sock, m) {
 			if (now - lastAi >= config.ai.cooldownMs) {
 				aiCooldownMap.set(cooldownKey, now);
 
-
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
 					await sock.sendPresenceUpdate("composing", from);
@@ -230,10 +308,8 @@ async function handleMessage(sock, m) {
 					// Abaikan gagal presence
 				}
 
-
 				// Bersihkan tag @bot (nomor HP, LID, atau nama bot) agar prompt ke AI bersih
 				let cleanMessage = trimmedBody;
-				const botLidNumber = botLid ? botLid.replace(/[^0-9]/g, "") : null;
 				if (botNumber) {
 					cleanMessage = cleanMessage.replace(new RegExp(`@${botNumber}`, "g"), "");
 				}
@@ -243,15 +319,44 @@ async function handleMessage(sock, m) {
 				if (config.botName) {
 					cleanMessage = cleanMessage.replace(new RegExp(`@${config.botName}`, "gi"), "");
 				}
-				cleanMessage = cleanMessage.replace(/@\d+/g, "").trim() || trimmedBody;
+				cleanMessage = cleanMessage.replace(/@\d+/g, "").trim();
+
+				const history = getChatHistory(from);
+				const quotedText = quotedMsg ? cleanDisplayBody(extractMessageText(quotedMsg, quotedType).trim()) : "";
+				const aiImage = await extractAiImage(msg, messageType, quotedMsg, quotedType);
+
+				const lastHistoryEntry = history[history.length - 1];
+				const isSameAsLastModel =
+					lastHistoryEntry && lastHistoryEntry.role === "model" && lastHistoryEntry.text === quotedText;
+
+				const quotedContext =
+					quotedText && !isSameAsLastModel
+						? { sender: isReplyingToBot ? config.botName : "Pengguna lain", text: quotedText }
+						: null;
+
+				if (!cleanMessage) {
+					if (aiImage) cleanMessage = "Tolong lihat dan jelaskan atau tanggapi gambar ini.";
+					else if (quotedText) cleanMessage = "Tolong tanggapi atau jelaskan pesan yang dibalas ini.";
+					else cleanMessage = trimmedBody;
+				}
+
+				const groupName = isGroup ? groupNameCache.get(from) : null;
 
 				try {
 					const aiReply = await generateReply({
 						message: cleanMessage,
+						senderName: pushName,
+						groupName,
+						history,
+						quotedContext,
+						image: aiImage,
 						botName: config.botName,
 						config,
 					});
 					await sock.sendMessage(from, { text: aiReply }, { quoted: m });
+					const userHistoryText = isGroup ? `[${pushName}]: ${cleanMessage}` : cleanMessage;
+					appendChatHistory(from, "user", userHistoryText);
+					appendChatHistory(from, "model", aiReply);
 					const aiPreview = (aiReply.length > 70 ? aiReply.slice(0, 70) + "…" : aiReply).replace(/\n/g, `\n${color.cyan}`);
 					console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  Membalas ${color.bold}[${pushName}]${color.reset}: ${color.cyan}"${aiPreview}"${color.reset}`);
 				} catch (err) {
@@ -266,6 +371,10 @@ async function handleMessage(sock, m) {
 		// 2. OTOMATISASI PESAN / AUTO-RESPONDER NON-COMMAND (FAQ & KEYWORDS)
 		// =========================================================================
 		if (!isCommand && trimmedBody) {
+			// Simpan obrolan biasa ke memori agar AI nyambung jika di-mention setelahnya
+			const historyLine = isGroup ? `[${pushName}]: ${displayBody}` : displayBody;
+			appendChatHistory(from, "user", historyLine);
+
 			if (config.autoReply.privateOnly && isGroup) {
 				return; // Jangan respon di grup jika disetel khusus chat pribadi
 			}

@@ -1,3 +1,4 @@
+const axios = require("axios");
 const config = require("../config");
 const {
 	downloadMediaBuffer,
@@ -10,6 +11,7 @@ const {
 } = require("./utils/mediaHelper");
 const { getJadwalKuliah } = require("./utils/jadwalHelper");
 const { getPjMatkul } = require("./utils/pjHelper");
+const { createIqcImage } = require("./utils/iqcHelper");
 
 /**
  * Format durasi waktu ke teks terbaca (hari, jam, menit, detik)
@@ -91,6 +93,8 @@ async function handleCase(context) {
 ┃   _Bikin stiker teks brat putih (teks besar, emoji berwarna, blur)._
 ┃ • *${prefix}toimg*
 ┃   _Ubah stiker jadi gambar kembali._
+┃ • *${prefix}iqc* <teks>
+┃   _Bikin iPhone Quoted Chat (kiri default, atau aku | teks untuk kanan)._
 ┣━━━❰ 📚 *AKADEMIK & JADWAL* ❱━━━┫
 ┃ • *${prefix}jadwal* <kelas> [hari]
 ┃   _Cek jadwal (hari ini, besok, lusa, semua)._
@@ -102,11 +106,13 @@ async function handleCase(context) {
 ┃ • *${prefix}runtime* - Status server & RAM
 ┣━━━❰ 📢 *OWNER* ❱━━━┫
 ┃ • *${prefix}listgrup* - Daftar grup bot (Owner)
+┃ • *${prefix}join* <link> - Gabung ke grup (Owner)
+┃ • *${prefix}leave* [no/id] - Keluar grup (Owner)
 ┃
 ╰━━━━━━━━━━━━━━━━━━━━━━━╯
 _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 
-			await sock.sendMessage(sender, { text: menuText });
+			await reply(menuText);
 			break;
 		}
 
@@ -336,6 +342,97 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 		}
 
 		// =========================================================================
+		// IPHONE QUOTED CHAT (.iqc <teks> | .iqc <nama> | <teks> | reply pesan)
+		// =========================================================================
+		case "iqc":
+		case "iphonequote":
+		case "iphonechat": {
+			const quotedText = quotedMsg
+				? (
+					quotedMsg.conversation ||
+					quotedMsg.extendedTextMessage?.text ||
+					quotedMsg.imageMessage?.caption ||
+					quotedMsg.videoMessage?.caption ||
+					""
+				).trim()
+				: "";
+
+			const rawInput = text.trim();
+			if (!rawInput && !quotedText) {
+				return await reply(
+					`⚠️ *Teks Tidak Ditemukan!*\n\nContoh penggunaan:\n` +
+					`• *${prefix}iqc Terkadang aku merasa pantas diabaikan...*\n` +
+					`• *${prefix}iqc aku | biar semesta aja yg atur 🙏*\n\n` +
+					`Atau balas (reply) pesan seseorang lalu ketik *${prefix}iqc*`
+				);
+			}
+
+			await react("⏳");
+
+			try {
+				let quoteText = rawInput;
+				let side = "other";
+				let avatarTarget = isGroup ? from : sender;
+
+				if (rawInput.includes("|")) {
+					const pipeIdx = rawInput.indexOf("|");
+					const customSide = rawInput.slice(0, pipeIdx).trim().toLowerCase();
+					const customText = rawInput.slice(pipeIdx + 1).trim();
+					quoteText = customText || quotedText;
+
+					if (!quoteText) {
+						await react("❌");
+						return await reply(`⚠️ Teks setelah tanda \`|\` masih kosong.`);
+					}
+
+					const selfAliases = ["aku", "me", "gw", "gue", "saya", "kanan", "you"];
+					side = selfAliases.includes(customSide) ? "you" : "other";
+					avatarTarget = side === "you" ? sender : (contextInfo?.participant || avatarTarget);
+				} else if (!rawInput && quotedText) {
+					quoteText = quotedText;
+					const quotedParticipant = contextInfo?.participant || null;
+					const cleanParticipant = quotedParticipant ? quotedParticipant.replace(/[^0-9]/g, "") : "";
+					const cleanBotJid = context.botJid ? context.botJid.replace(/[^0-9]/g, "") : "";
+					const cleanBotLid = context.botLid ? context.botLid.replace(/[^0-9]/g, "") : "";
+
+					const isQuotedBot =
+						contextInfo?.quotedMessage?.fromMe === true ||
+						(cleanParticipant && (cleanParticipant === cleanBotJid || cleanParticipant === cleanBotLid));
+
+					side = isQuotedBot ? "you" : "other";
+					avatarTarget = isGroup ? from : (quotedParticipant || sender);
+				}
+
+				let avatarBuffer = null;
+				if (avatarTarget && typeof sock.profilePictureUrl === "function") {
+					try {
+						const ppUrl = await sock.profilePictureUrl(avatarTarget, "image");
+						if (ppUrl) {
+							const res = await axios.get(ppUrl, { responseType: "arraybuffer", timeout: 4000 });
+							avatarBuffer = Buffer.from(res.data);
+						}
+					} catch (e) {
+						// Foto profil tidak tersedia/privat → pakai siluet header default
+					}
+				}
+
+				const iqcPng = await createIqcImage({
+					text: quoteText,
+					side,
+					avatarBuffer,
+				});
+
+				await sock.sendMessage(from, { image: iqcPng }, { quoted: m });
+				await react("✅");
+			} catch (err) {
+				console.error("Error saat membuat gambar iqc:", err);
+				await react("❌");
+				await reply(`❌ Gagal membuat gambar iqc: ${err.message}`);
+			}
+			break;
+		}
+
+		// =========================================================================
 		// DAFTAR GRUP YANG DIIKUTI BOT (.listgrup - KHUSUS OWNER)
 		// =========================================================================
 		case "listgrup":
@@ -371,6 +468,127 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				console.error("Error saat mengambil daftar grup:", err);
 				await react("❌");
 				await reply(`❌ Gagal mengambil daftar grup: ${err.message}`);
+			}
+			break;
+		}
+
+		// =========================================================================
+		// GABUNG GRUP VIA LINK UNDANGAN (.join - KHUSUS OWNER)
+		// =========================================================================
+		case "join": {
+			if (!isOwner) {
+				return await reply("⛔ Perintah ini hanya dapat digunakan oleh Pemilik (Owner) Bot!");
+			}
+
+			const linkMatch = text.match(/chat\.whatsapp\.com\/([0-9A-Za-z]{20,})/i);
+			const inviteCode = linkMatch ? linkMatch[1] : (/^[0-9A-Za-z]{20,}$/.test(text.trim()) ? text.trim() : "");
+
+			if (!inviteCode) {
+				return await reply(
+					`⚠️ *Link Undangan Tidak Valid!*\n\nContoh:\n• *${prefix}join https://chat.whatsapp.com/AbCdEfGhIjKlMnOpQrStUv*`
+				);
+			}
+
+			await react("⏳");
+
+			try {
+				const groupJid = await sock.groupAcceptInvite(inviteCode);
+				let groupName = "grup";
+				if (groupJid) {
+					try {
+						const meta = await sock.groupMetadata(groupJid);
+						if (meta?.subject) groupName = `*${meta.subject}*`;
+					} catch (e) {
+						// Abaikan jika gagal mengambil nama grup
+					}
+				}
+				await reply(`✅ Berhasil bergabung ke ${groupName}!`);
+				await react("✅");
+			} catch (err) {
+				console.error("Error saat join grup:", err);
+				await react("❌");
+				await reply(`❌ Gagal masuk ke grup: ${err.message}`);
+			}
+			break;
+		}
+
+		// =========================================================================
+		// KELUARKAN BOT DARI GRUP (.leave - KHUSUS OWNER)
+		// =========================================================================
+		case "leave":
+		case "keluar": {
+			if (!isOwner) {
+				return await reply("⛔ Perintah ini hanya dapat digunakan oleh Pemilik (Owner) Bot!");
+			}
+
+			const arg = text.trim();
+
+			if (!arg) {
+				if (!isGroup) {
+					return await reply(
+						`⚠️ Gunakan perintah ini di dalam grup, atau masukkan nomor urut dari *${prefix}listgrup*.\nContoh: *${prefix}leave 1*`
+					);
+				}
+				await reply("👋 Bot keluar dari grup ini.");
+				await react("✅");
+				try {
+					await sock.groupLeave(from);
+				} catch (err) {
+					console.error("Error saat leave grup:", err);
+					await react("❌");
+					await reply(`❌ Gagal keluar dari grup: ${err.message}`);
+				}
+				break;
+			}
+
+			await react("⏳");
+
+			try {
+				let targetJid = null;
+				let targetName = arg;
+
+				if (/^\d+$/.test(arg)) {
+					const groupsMap = await sock.groupFetchAllParticipating();
+					const groups = Object.values(groupsMap || {}).sort((a, b) =>
+						(a.subject || "").localeCompare(b.subject || "", "id")
+					);
+					const chosen = groups[Number(arg) - 1];
+					if (!chosen) {
+						await react("❌");
+						return await reply(
+							`⚠️ Nomor grup *${arg}* tidak ditemukan. Cek urutan lewat *${prefix}listgrup*.`
+						);
+					}
+					targetJid = chosen.id;
+					targetName = chosen.subject || chosen.id;
+				} else if (arg.endsWith("@g.us")) {
+					targetJid = arg;
+					try {
+						const meta = await sock.groupMetadata(targetJid);
+						if (meta?.subject) targetName = meta.subject;
+					} catch (e) {
+						// Pakai JID sebagai fallback nama
+					}
+				} else {
+					await react("❌");
+					return await reply(
+						`⚠️ Format tidak valid! Masukkan nomor urut dari *${prefix}listgrup* atau ID grup (\`@g.us\`).`
+					);
+				}
+
+				if (targetJid === from) {
+					await reply("👋 Bot keluar dari grup ini.");
+					await react("✅");
+					await sock.groupLeave(targetJid);
+				} else {
+					await sock.groupLeave(targetJid);
+					await reply(`✅ Berhasil keluar dari grup *${targetName}*.`);
+					await react("✅");
+				}
+			} catch (err) {
+				console.error("Error saat leave grup:", err);
+				await react("❌");
+				await reply(`❌ Gagal keluar dari grup: ${err.message}`);
 			}
 			break;
 		}
