@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 /**
  * Konfigurasi Utama WhatsApp Bot Baileys
