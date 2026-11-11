@@ -66,6 +66,43 @@ function releaseLock() {
     // Abaikan error hapus lockfile
   }
 }
+
+// Migrasi satu kali saat upgrade dari Baileys v6 -> v7:
+// Hapus cache sender-key-memory & sender-key PN milik bot sendiri yang korup di grup LID,
+// tanpa menghapus creds.json atau sesi login agar tidak perlu pairing ulang.
+function migrateLegacyGroupSenderKeys() {
+  const marker = path.join(sessionDir, '.lid-v7-migrated');
+  const credsPath = path.join(sessionDir, 'creds.json');
+  if (fs.existsSync(marker) || !fs.existsSync(credsPath)) return;
+
+  try {
+    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+    const botPhone = creds?.me?.id ? creds.me.id.split(':')[0].split('@')[0].replace(/[^0-9]/g, '') : '';
+    const files = fs.readdirSync(sessionDir);
+    let cleaned = 0;
+
+    for (const file of files) {
+      const isMemory = file.startsWith('sender-key-memory-') && file.endsWith('.json');
+      const isOwnPnSenderKey =
+        botPhone &&
+        file.startsWith('sender-key-') &&
+        file.includes(`--${botPhone}--`) &&
+        file.endsWith('.json');
+
+      if (isMemory || isOwnPnSenderKey) {
+        fs.unlinkSync(path.join(sessionDir, file));
+        cleaned++;
+      }
+    }
+
+    fs.writeFileSync(marker, new Date().toISOString(), 'utf8');
+    if (cleaned > 0) {
+      console.log(`🔧 [MIGRASI] Membersihkan ${cleaned} cache sender-key v6 lama agar grup LID bisa menerima balasan.`);
+    }
+  } catch (err) {
+    console.warn('Peringatan migrasi sender-key:', err.message);
+  }
+}
 /**
  * Inisialisasi dan menghubungkan bot WhatsApp menggunakan Whiskeysockets Baileys
  */
@@ -85,9 +122,11 @@ async function startBot() {
   }));
   console.log(`Menggunakan WA Web versi: v${version.join('.')}`);
 
+  // Bersihkan cache sender-key lama warisan Baileys v6 sebelum memuat auth state
+  migrateLegacyGroupSenderKeys();
+
   // Manajemen otentikasi multi-file (session tersimpan di folder ./session)
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-
   // Cache pesan terkirim/masuk agar Baileys bisa merespon retry request enkripsi (mencegah pesan macet "mengetik...")
   const msgStore = new Map();
   const rememberMessage = (id, message) => {

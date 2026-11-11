@@ -197,12 +197,26 @@ async function handleMessage(sock, m) {
 			return cleaned;
 		};
 
-		// Normalisasi nomor pengirim untuk pengecekan status owner
-		const senderNumbers = [sender, m.key.participantPn, m.key.senderPn]
+		// Normalisasi nomor pengirim untuk pengecekan status owner (mendukung PN & LID Baileys v7)
+		let senderPnAlt = null;
+		if (sender && sender.endsWith("@lid") && sock.signalRepository?.lidMapping?.getPNForLID) {
+			try {
+				senderPnAlt = await sock.signalRepository.lidMapping.getPNForLID(sender);
+			} catch (e) {
+				// Abaikan jika mapping LID belum tersedia
+			}
+		}
+		const senderNumbers = [
+			sender,
+			m.key.participantAlt,
+			m.key.remoteJidAlt,
+			m.key.participantPn,
+			m.key.senderPn,
+			senderPnAlt,
+		]
 			.filter(Boolean)
-			.map((jid) => jid.replace(/[^0-9]/g, ""));
+			.map((jid) => jid.split(":")[0].replace(/[^0-9]/g, ""));
 		const isOwner = config.ownerNumbers.some((num) => senderNumbers.includes(num.replace(/[^0-9]/g, "")));
-
 		// Ekstraksi pesan aktual (antisipasi ephemeral & viewOnce wrapper)
 		let msg = unwrapMessage(m.message);
 		if (!msg) return;
