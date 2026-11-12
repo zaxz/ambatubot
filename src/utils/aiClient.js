@@ -192,6 +192,7 @@ async function generateReply({ message, senderName, groupName, history = [], quo
 		`  • Bikin Stiker: Kirim atau balas foto/video (maks ${maxVideoSecs} detik) dengan caption "${prefix}s".`,
 		`  • Bikin Stiker Meme: Kirim atau balas gambar dengan "${prefix}smeme teks atas | teks bawah".`,
 		`  • Bikin Stiker Brat: Ketik "${prefix}brat <teks>".`,
+		`  • Bikin Stiker Brat Bergerak: Ketik "${prefix}bratvid <teks>".`,
 		`  • Stiker jadi Gambar: Balas stiker dengan perintah "${prefix}toimg".`,
 		`  • iPhone Quoted Chat (IQC): Ketik "${prefix}iqc <teks>", "${prefix}iqc aku | <teks>" (bubble hijau kanan), atau balas chat dengan "${prefix}iqc".`,
 		`  • Cek Jadwal Kuliah: Ketik "${prefix}jadwal <kelas> [hari ini/besok/semua]" (contoh: "${prefix}jadwal 3p51 besok").`,

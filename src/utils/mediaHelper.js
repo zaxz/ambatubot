@@ -7,6 +7,7 @@ const webp = require("node-webpmux");
 const axios = require("axios");
 const { loadFont } = require("./ttfFont");
 const { getEmojiAssetPath } = require("./emojiAsset");
+const { ensureCjkFont, segmentCjkWords, CJK_CHAR_PATTERN } = require("./cjkFont");
 
 /**
  * Menyiapkan path agar aman dipakai di dalam opsi filter FFmpeg.
@@ -265,7 +266,46 @@ function splitBalancedWords(words, prefix, spaceEm, lineCount) {
 }
 
 /**
- * Menata satu bagian teks meme (atas/bawah) dengan font Impact sebesar mungkin
+ * Menggabungkan metrik font utama dan font fallback CJK per karakter.
+ */
+function makeFallbackMetricView(primaryFont, primaryPath, fallbackFont = null, fallbackPath = null) {
+	const resolveChar = (char) => {
+		if (primaryFont.hasGlyph(char)) return { font: primaryFont, path: primaryPath };
+		if (fallbackFont && fallbackFont.hasGlyph(char)) return { font: fallbackFont, path: fallbackPath };
+		return null;
+	};
+	return {
+		hasGlyph: (char) => Boolean(resolveChar(char)),
+		resolveChar,
+		advanceEm: (char) => {
+			const hit = resolveChar(char);
+			return hit ? hit.font.advanceEm(char) : 0;
+		},
+		advancePx: (char, fontSize) => {
+			const hit = resolveChar(char);
+			return hit ? hit.font.advancePx(char, fontSize) : 0;
+		},
+		measureEm: (str) => {
+			let total = 0;
+			for (const ch of str) {
+				const hit = resolveChar(ch);
+				if (hit) total += hit.font.advanceEm(ch);
+			}
+			return total;
+		},
+		measurePx: (str, fontSize) => {
+			let total = 0;
+			for (const ch of str) {
+				const hit = resolveChar(ch);
+				if (hit) total += hit.font.advancePx(ch, fontSize);
+			}
+			return total;
+		},
+	};
+}
+
+/**
+ * Menata satu bagian teks meme (atas/bawah) dengan font sebesar mungkin
  * yang masih muat di lebar kanvas dan batas tinggi slot.
  */
 function planMemeSlot(font, rawText, slotMaxH) {
@@ -296,7 +336,9 @@ function planMemeSlot(font, rawText, slotMaxH) {
 		const maxWidthEm = Math.max(...lines.map((line) => font.measureEm(line)));
 		fontSize = sizeFor(lines.length, maxWidthEm);
 	} else {
-		const words = manualLines[0].split(" ");
+		const words = manualLines[0].split(" ").flatMap((w) =>
+			CJK_CHAR_PATTERN.test(w) ? segmentCjkWords(w) : [w]
+		);
 		const spaceEm = font.advanceEm(" ");
 		const prefix = new Array(words.length + 1).fill(0);
 		for (let i = 0; i < words.length; i++) prefix[i + 1] = prefix[i] + font.measureEm(words[i]);
@@ -309,7 +351,17 @@ function planMemeSlot(font, rawText, slotMaxH) {
 			const fs = sizeFor(count, split.maxWidthEm);
 			// Pertahankan 1 baris kecuali memecah baris membuat huruf jauh lebih besar (>18% atau 1 baris <64px)
 			if (!best || fs > best.fontSize * 1.18 || (best.fontSize < 64 && fs > best.fontSize + 1)) {
-				best = { lines: split.groups.map((group) => group.join(" ")), fontSize: fs };
+				const joinedLines = split.groups.map((group) => {
+					let out = "";
+					for (let gi = 0; gi < group.length; gi++) {
+						const prev = group[gi - 1];
+						const cur = group[gi];
+						const bothCjk = prev && CJK_CHAR_PATTERN.test(prev) && CJK_CHAR_PATTERN.test(cur);
+						out += (gi > 0 && !bothCjk ? " " : "") + cur;
+					}
+					return out;
+				});
+				best = { lines: joinedLines, fontSize: fs };
 			}
 		}
 
@@ -345,28 +397,65 @@ async function createMemeSticker(inputBuffer, topText = "", bottomText = "") {
 		await fs.promises.writeFile(inputPath, inputBuffer);
 		await fs.promises.mkdir(textDir, { recursive: true });
 
-		const font = loadFont(MEME_FONT);
+		const primaryFont = loadFont(MEME_FONT);
+		const combined = `${topText || ""}${bottomText || ""}`;
+		const needsCjk = [...combined].some((ch) => !/\s/.test(ch) && !primaryFont.hasGlyph(ch));
+		const cjkFontPath = needsCjk ? await ensureCjkFont().catch(() => null) : null;
+		const cjkFont = cjkFontPath ? loadFont(cjkFontPath) : null;
+		const metricFont = makeFallbackMetricView(primaryFont, MEME_FONT, cjkFont, cjkFontPath);
+
 		const hasTop = Boolean(topText && topText.trim());
 		const hasBottom = Boolean(bottomText && bottomText.trim());
 		const slotMaxH = hasTop && hasBottom ? 195 : 225;
 
-		const topSlot = planMemeSlot(font, topText, slotMaxH);
-		const bottomSlot = planMemeSlot(font, bottomText, slotMaxH);
+		const topSlot = planMemeSlot(metricFont, topText, slotMaxH);
+		const bottomSlot = planMemeSlot(metricFont, bottomText, slotMaxH);
 
 		const filters = [
 			"scale=512:512:force_original_aspect_ratio=increase:flags=lanczos,crop=512:512",
 		];
-		const fontOption = `fontfile='${escapeFilterPath(MEME_FONT)}'`;
 
 		let lineIdx = 0;
 		const pushSlotLines = async (slot, startY) => {
 			for (let i = 0; i < slot.lines.length; i++) {
-				const lineFile = path.join(textDir, `l${lineIdx++}.txt`);
-				await fs.promises.writeFile(lineFile, slot.lines[i], "utf8");
+				const lineText = slot.lines[i];
 				const y = Math.round(startY + slot.border + i * slot.lineStep);
-				filters.push(
-					`drawtext=${fontOption}:textfile='${escapeFilterPath(lineFile)}':expansion=none:fontcolor=white:bordercolor=black:borderw=${slot.border}:fontsize=${slot.fontSize}:x=(w-text_w)/2:y=${y}`
-				);
+				const totalW = metricFont.measurePx(lineText, slot.fontSize);
+				let penX = Math.round((MEME_CANVAS - totalW) / 2);
+
+				let run = "";
+				let runPath = MEME_FONT;
+				let runFont = primaryFont;
+
+				const flushMemeRun = async () => {
+					if (!run) return;
+					const lineFile = path.join(textDir, `l${lineIdx++}.txt`);
+					await fs.promises.writeFile(lineFile, run, "utf8");
+					filters.push(
+						`drawtext=fontfile='${escapeFilterPath(runPath)}':textfile='${escapeFilterPath(lineFile)}':expansion=none:fontcolor=white:bordercolor=black:borderw=${slot.border}:fontsize=${slot.fontSize}:x=${Math.round(penX)}:y=${y}`
+					);
+					for (const ch of run) {
+						if (runFont.hasGlyph(ch)) penX += runFont.advancePx(ch, slot.fontSize);
+					}
+					run = "";
+				};
+
+				for (const ch of lineText) {
+					let nextFont = primaryFont;
+					let nextPath = MEME_FONT;
+					if (/\s/.test(ch) && run && runFont.hasGlyph(ch)) {
+						nextFont = runFont;
+						nextPath = runPath;
+					} else if (!primaryFont.hasGlyph(ch) && cjkFont && cjkFont.hasGlyph(ch)) {
+						nextFont = cjkFont;
+						nextPath = cjkFontPath;
+					}
+					if (run && nextPath !== runPath) await flushMemeRun();
+					runFont = nextFont;
+					runPath = nextPath;
+					run += ch;
+				}
+				await flushMemeRun();
 			}
 		};
 
@@ -465,15 +554,31 @@ function tokenize(text) {
  * sehingga tata letak bisa menghitung lebar/tinggi tanpa peduli jenis karakternya.
  * @param {Map<string, string>} emojiAssets - token emoji → path PNG
  */
-function createBratTypography(emojiAssets) {
+function createBratTypography(emojiAssets, cjkFontInfo = null) {
 	const textFont = loadFont(BRAT_TEXT_FONT);
+	const cjkFont = cjkFontInfo?.font || null;
+	const cjkFontPath = cjkFontInfo?.path || null;
+
+	const fontForChar = (char) => {
+		if (textFont.hasGlyph(char)) return textFont;
+		if (cjkFont && cjkFont.hasGlyph(char)) return cjkFont;
+		return null;
+	};
+
+	const fontPathForChar = (char) => {
+		if (textFont.hasGlyph(char)) return BRAT_TEXT_FONT;
+		if (cjkFont && cjkFont.hasGlyph(char)) return cjkFontPath;
+		return null;
+	};
 
 	const isEmoji = (token) => emojiAssets.has(token);
-	const isText = (token) => [...token].every((char) => /\s/.test(char) || textFont.hasGlyph(char));
+	const isText = (token) => [...token].every((char) => /\s/.test(char) || Boolean(fontForChar(char)));
 
 	return {
 		isEmoji,
 		isText,
+		fontForChar,
+		fontPathForChar,
 		textFonts: () => textFont,
 		assetOf: (token) => emojiAssets.get(token),
 		advanceEm(token) {
@@ -481,7 +586,8 @@ function createBratTypography(emojiAssets) {
 
 			let total = 0;
 			for (const char of token) {
-				if (textFont.hasGlyph(char)) total += textFont.advanceEm(char);
+				const f = fontForChar(char);
+				if (f) total += f.advanceEm(char);
 			}
 			return total;
 		},
@@ -490,7 +596,8 @@ function createBratTypography(emojiAssets) {
 
 			let total = 0;
 			for (const char of token) {
-				if (textFont.hasGlyph(char)) total += textFont.advancePx(char, fontSize);
+				const f = fontForChar(char);
+				if (f) total += f.advancePx(char, fontSize);
 			}
 			return total;
 		},
@@ -520,8 +627,9 @@ function createBratTypography(emojiAssets) {
 				}
 
 				for (const char of token) {
-					if (!textFont.hasGlyph(char)) continue;
-					const box = textFont.inkEm(char);
+					const f = fontForChar(char);
+					if (!f) continue;
+					const box = f.inkEm(char);
 					if (box.ascent > ascent) ascent = box.ascent;
 					if (box.descent > descent) descent = box.descent;
 				}
@@ -615,11 +723,9 @@ async function collectEmojiAssets(tokens) {
 }
 
 /**
- * Membuat stiker teks Brat (latar putih, teks hitam besar rata kanan-kiri, emoji berwarna, blur).
- * @param {string} text - Teks brat
- * @returns {Promise<Buffer>} - Buffer WebP stiker 512x512
+ * Menyiapkan teks, font, dan aset emoji berwarna untuk rendering Brat.
  */
-async function createBratSticker(text) {
+async function prepareBratInput(text) {
 	const prepared = String(text).replace(BRAT_TEXT_VARIATION, "");
 	const baseFont = loadFont(BRAT_TEXT_FONT);
 	const rawTokens = tokenize(prepared);
@@ -631,7 +737,13 @@ async function createBratSticker(text) {
 	);
 	const emojiAssets = await collectEmojiAssets(emojiCandidates);
 
-	const typo = createBratTypography(emojiAssets);
+	// Cek apakah butuh font fallback CJK (Jepang / Mandarin)
+	const needsCjk = rawTokens.some(
+		(token) => !/\s/.test(token) && !emojiAssets.has(token) && ![...token].every((c) => baseFont.hasGlyph(c))
+	);
+	const cjkPath = needsCjk ? await ensureCjkFont().catch(() => null) : null;
+	const cjkFontInfo = cjkPath ? { path: cjkPath, font: loadFont(cjkPath) } : null;
+	const typo = createBratTypography(emojiAssets, cjkFontInfo);
 
 	// Sisakan hanya karakter yang bisa digambar: teks (di-lowercase), emoji yang asetnya tersedia
 	const kept = rawTokens
@@ -648,18 +760,30 @@ async function createBratSticker(text) {
 		throw new Error("Teks brat tidak berisi huruf yang didukung font");
 	}
 
-	const words = forcedLines.flatMap((line) => line.split(" "));
+	return { forcedLines, typo };
+}
+
+/**
+ * Merender satu frame WebP 512x512 bergaya Brat dari baris teks yang sudah disiapkan.
+ * @param {Array<string>} forcedLines
+ * @param {Object} typo
+ * @param {number} quality
+ * @returns {Promise<Buffer>}
+ */
+async function renderBratFrame(forcedLines, typo, quality = 92) {
+	const splitBratLineWords = (line) =>
+		line.split(" ").flatMap((w) => (CJK_CHAR_PATTERN.test(w) ? segmentCjkWords(w) : [w]));
+	const words = forcedLines.flatMap(splitBratLineWords);
 	const inkTotalEm = blockInkEm(typo, words);
 
 	// Tentukan pembagian baris: hormati enter manual, selain itu cari yang paling besar
 	const planned =
 		forcedLines.length > 1
 			? {
-					lines: forcedLines.map((line) => line.split(" ")),
+					lines: forcedLines.map(splitBratLineWords),
 					maxWidthEm: Math.max(...forcedLines.map((line) => typo.measureEm(line))),
 			  }
 			: planBratLines(typo, words);
-
 	const lines = planned.lines;
 	const inkAscentEm = Math.max(...words.map((word) => typo.inkOf(word).ascent));
 
@@ -723,6 +847,7 @@ async function createBratSticker(text) {
 			let penX = marginX;
 			for (const word of line) {
 				let textRun = "";
+				let textRunFontPath = BRAT_TEXT_FONT;
 
 				const flushRun = async () => {
 					if (!textRun) return;
@@ -731,7 +856,7 @@ async function createBratSticker(text) {
 					// dihitung sendiri agar baseline semua potongan sejajar
 					const y = Math.round(baseline - typo.inkOf(textRun).ascent * fontSize);
 					draws.push(
-						`drawtext=fontfile='${escapeFilterPath(BRAT_TEXT_FONT)}':textfile='${escapeFilterPath(file)}':expansion=none:fontcolor=black:fontsize=${fontSize}:x=${Math.round(penX)}:y=${y}`
+						`drawtext=fontfile='${escapeFilterPath(textRunFontPath)}':textfile='${escapeFilterPath(file)}':expansion=none:fontcolor=black:fontsize=${fontSize}:x=${Math.round(penX)}:y=${y}`
 					);
 					penX += typo.measurePx(textRun, fontSize);
 					textRun = "";
@@ -756,7 +881,16 @@ async function createBratSticker(text) {
 						});
 						penX += advance;
 					} else {
-						textRun += token;
+						for (const ch of token) {
+							const chPath = /\s/.test(ch) && textRun
+								? textRunFontPath
+								: (typo.fontPathForChar(ch) || BRAT_TEXT_FONT);
+							if (textRun && chPath !== textRunFontPath) {
+								await flushRun();
+							}
+							textRunFontPath = chPath;
+							textRun += ch;
+						}
 					}
 				}
 
@@ -791,7 +925,7 @@ async function createBratSticker(text) {
 			"-map", "[out]",
 			"-frames:v", "1",
 			"-c:v", "libwebp",
-			"-quality", "92",
+			"-quality", String(quality),
 			"-compression_level", "6",
 			outputPath
 		);
@@ -805,6 +939,155 @@ async function createBratSticker(text) {
 	}
 }
 
+/**
+ * Merender satu frame putih polos 512x512 WebP (fallback animasi 1 huruf/emoji).
+ */
+async function renderWhiteBratFrame() {
+	const tmpPath = path.join(os.tmpdir(), `brat_blank_${Date.now()}_${Math.random().toString(36).substring(7)}.webp`);
+	try {
+		await runFfmpeg([
+			"-y",
+			"-f", "lavfi",
+			"-i", `color=c=white:s=${BRAT_CANVAS}x${BRAT_CANVAS}`,
+			"-frames:v", "1",
+			"-c:v", "libwebp",
+			"-quality", "80",
+			tmpPath,
+		]);
+		return await fs.promises.readFile(tmpPath);
+	} finally {
+		if (fs.existsSync(tmpPath)) await fs.promises.unlink(tmpPath).catch(() => {});
+	}
+}
+
+/**
+ * Membuat stiker teks Brat (latar putih, teks hitam besar rata kanan-kiri, emoji berwarna, blur).
+ * @param {string} text - Teks brat
+ * @returns {Promise<Buffer>} - Buffer WebP stiker 512x512
+ */
+async function createBratSticker(text) {
+	const { forcedLines, typo } = await prepareBratInput(text);
+	return await renderBratFrame(forcedLines, typo);
+}
+
+const BRATVID_MAX_STEPS = 18;
+const BRATVID_CONCURRENCY = 4;
+const BRATVID_FINAL_HOLD_MS = 1400;
+const BRATVID_MAX_SIZE_BYTES = 950 * 1024;
+
+/**
+ * Membuat stiker teks Brat bergerak (kata muncul bertahap kata demi kata).
+ * @param {string} text - Teks brat
+ * @param {number} maxDurationSeconds - Batas maksimal durasi animasi (detik)
+ * @returns {Promise<Buffer>} - Buffer Animated WebP 512x512
+ */
+async function createBratVideoSticker(text, maxDurationSeconds = 9) {
+	const { forcedLines, typo } = await prepareBratInput(text);
+	const wordEntries = forcedLines.flatMap((line, lineIdx) =>
+		line.split(" ").flatMap((w) => {
+			const parts = CJK_CHAR_PATTERN.test(w) ? segmentCjkWords(w) : [w];
+			return parts.map((word, partIdx) => ({ lineIdx, word, joinPrev: partIdx > 0 }));
+		})
+	);
+
+	const buildSampledCounts = (total) => {
+		const counts = [];
+		if (total <= BRATVID_MAX_STEPS) {
+			for (let i = 1; i <= total; i++) counts.push(i);
+			return counts;
+		}
+		for (let s = 1; s < BRATVID_MAX_STEPS; s++) {
+			const idx = Math.max(1, Math.round((s * total) / BRATVID_MAX_STEPS));
+			if (counts[counts.length - 1] !== idx) counts.push(idx);
+		}
+		if (counts[counts.length - 1] !== total) counts.push(total);
+		return counts;
+	};
+
+	// Susun daftar frame progresif (per kata, atau per karakter jika hanya 1 kata)
+	const stepDescriptors = [];
+	if (wordEntries.length > 1) {
+		for (const count of buildSampledCounts(wordEntries.length)) {
+			const byLine = new Map();
+			for (const entry of wordEntries.slice(0, count)) {
+				if (!byLine.has(entry.lineIdx)) byLine.set(entry.lineIdx, "");
+				const prev = byLine.get(entry.lineIdx);
+				byLine.set(entry.lineIdx, prev + (prev && !entry.joinPrev ? " " : "") + entry.word);
+			}
+			stepDescriptors.push({
+				blank: false,
+				lines: [...byLine.values()],
+			});
+		}
+	} else {
+		const tokens = tokenize(wordEntries[0].word);
+		if (tokens.length > 1) {
+			for (const count of buildSampledCounts(tokens.length)) {
+				stepDescriptors.push({
+					blank: false,
+					lines: [tokens.slice(0, count).join("")],
+				});
+			}
+		} else {
+			stepDescriptors.push({ blank: true });
+			stepDescriptors.push({ blank: false, lines: [wordEntries[0].word] });
+		}
+	}
+
+	const stepCount = stepDescriptors.length;
+	const maxTotalMs = Math.min(maxDurationSeconds, 9) * 1000;
+	const finalDelayMs = Math.min(BRATVID_FINAL_HOLD_MS, Math.max(800, maxTotalMs - (stepCount - 1) * 180));
+	const availableStepMs = Math.max(200, maxTotalMs - finalDelayMs);
+	const rawStepDelay = stepCount <= 5 ? 420 : stepCount <= 10 ? 340 : Math.round(4500 / (stepCount - 1));
+	const stepDelayMs = Math.max(180, Math.min(rawStepDelay, Math.floor(availableStepMs / Math.max(1, stepCount - 1))));
+
+	const renderAllFrames = async (quality) => {
+		const buffers = new Array(stepCount);
+		let cursor = 0;
+		const workers = Array.from({ length: Math.min(BRATVID_CONCURRENCY, stepCount) }, async () => {
+			while (true) {
+				const idx = cursor++;
+				if (idx >= stepCount) break;
+				const step = stepDescriptors[idx];
+				buffers[idx] = step.blank
+					? await renderWhiteBratFrame()
+					: await renderBratFrame(step.lines, typo, quality);
+			}
+		});
+		await Promise.all(workers);
+
+		const frames = [];
+		for (let i = 0; i < buffers.length; i++) {
+			const delay = i === buffers.length - 1 ? finalDelayMs : stepDelayMs;
+			frames.push(
+				await webp.Image.generateFrame({
+					buffer: buffers[i],
+					delay,
+					blend: false,
+					dispose: true,
+				})
+			);
+		}
+
+		return await webp.Image.save(null, {
+			frames,
+			width: BRAT_CANVAS,
+			height: BRAT_CANVAS,
+			loops: 0,
+			bgColor: [255, 255, 255, 255],
+			blend: false,
+			dispose: true,
+		});
+	};
+
+	let animBuffer = await renderAllFrames(92);
+	if (animBuffer.length > BRATVID_MAX_SIZE_BYTES) {
+		animBuffer = await renderAllFrames(65);
+	}
+
+	return animBuffer;
+}
+
 module.exports = {
 	downloadMediaBuffer,
 	imageToWebp,
@@ -813,4 +1096,5 @@ module.exports = {
 	addExif,
 	createMemeSticker,
 	createBratSticker,
+	createBratVideoSticker,
 };

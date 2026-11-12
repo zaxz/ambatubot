@@ -8,6 +8,7 @@ const {
 	addExif,
 	createMemeSticker,
 	createBratSticker,
+	createBratVideoSticker,
 } = require("./utils/mediaHelper");
 const { getJadwalKuliah } = require("./utils/jadwalHelper");
 const { getPjMatkul } = require("./utils/pjHelper");
@@ -97,6 +98,8 @@ async function handleCase(context) {
 ┃   _Bikin stiker meme dengan teks._
 ┃ • *${prefix}brat* <teks>
 ┃   _Bikin stiker teks brat putih (teks besar, emoji berwarna, blur)._
+┃ • *${prefix}bratvid* <teks>
+┃   _Bikin stiker teks brat bergerak kata demi kata._
 ┃ • *${prefix}toimg*
 ┃   _Ubah stiker jadi gambar kembali._
 ┃ • *${prefix}iqc* <teks>
@@ -312,6 +315,49 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				console.error("Error saat membuat stiker brat:", err);
 				await react("❌");
 				await reply(`❌ Gagal membuat stiker brat: ${err.message}`);
+			}
+			break;
+		}
+
+		// =========================================================================
+		// STIKER TEKS BRAT BERGERAK (.bratvid <teks>)
+		// =========================================================================
+		case "bratvid":
+		case "bratvideo":
+		case "bratgif": {
+			const bratText =
+				text ||
+				(quotedMsg
+					? quotedMsg.conversation ||
+					  quotedMsg.extendedTextMessage?.text ||
+					  quotedMsg.imageMessage?.caption ||
+					  quotedMsg.videoMessage?.caption
+					: "");
+
+			if (!bratText || !bratText.trim()) {
+				return await reply(
+					`⚠️ *Teks Tidak Ditemukan!*\n\nContoh penggunaan:\n` +
+					`• *${prefix}bratvid sok iye loe jadi orang*\n` +
+					`• *${prefix}bratvid kamu nanya*\n\n` +
+					`Atau balas (reply) pesan teks apa pun dengan *${prefix}bratvid*`
+				);
+			}
+
+			await react("⏳");
+
+			try {
+				const rawBratVid = await createBratVideoSticker(
+					bratText.trim(),
+					config.sticker.maxVideoDurationSeconds
+				);
+				const finalSticker = await addExif(rawBratVid, config.sticker.packName, config.sticker.packAuthor);
+
+				await sock.sendMessage(from, { sticker: finalSticker }, { quoted: m });
+				await react("✅");
+			} catch (err) {
+				console.error("Error saat membuat stiker bratvid:", err);
+				await react("❌");
+				await reply(`❌ Gagal membuat stiker bratvid: ${err.message}`);
 			}
 			break;
 		}

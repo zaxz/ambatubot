@@ -6,6 +6,7 @@ const path = require("path");
 const sharp = require("sharp");
 const { loadFont } = require("./ttfFont");
 const { getEmojiAssetPath } = require("./emojiAsset");
+const { ensureCjkFont } = require("./cjkFont");
 
 const SCALE = 2; // 2x retina -> 880x1912 px
 const CARD_W = 440;
@@ -179,14 +180,18 @@ function getCurrentIphoneTime() {
 	return `${hh}:${mm}`;
 }
 
-function wrapQuoteText(rawText, font, emojiMap, fontSize, maxContentW) {
+function wrapQuoteText(rawText, font, emojiMap, fontSize, maxContentW, fallbackFont = null) {
 	const emojiWidthPx = fontSize * 1.15;
+	const hasCharGlyph = (ch) => font.hasGlyph(ch) || Boolean(fallbackFont && fallbackFont.hasGlyph(ch));
+	const charAdvancePx = (ch) => {
+		if (font.hasGlyph(ch)) return font.advancePx(ch, fontSize);
+		if (fallbackFont && fallbackFont.hasGlyph(ch)) return fallbackFont.advancePx(ch, fontSize);
+		return 0;
+	};
 	const tokenWidthPx = (token) => {
 		if (emojiMap.has(token)) return emojiWidthPx;
 		let total = 0;
-		for (const char of token) {
-			if (font.hasGlyph(char)) total += font.advancePx(char, fontSize);
-		}
+		for (const char of token) total += charAdvancePx(char);
 		return total;
 	};
 	const measureLinePx = (tokens) => tokens.reduce((acc, t) => acc + tokenWidthPx(t), 0);
@@ -196,9 +201,8 @@ function wrapQuoteText(rawText, font, emojiMap, fontSize, maxContentW) {
 
 	for (const para of paragraphs) {
 		const cleanedTokens = tokenize(para).filter(
-			(token) => /\s/.test(token) || emojiMap.has(token) || [...token].every((c) => font.hasGlyph(c))
+			(token) => /\s/.test(token) || emojiMap.has(token) || [...token].every(hasCharGlyph)
 		);
-
 		const paraStr = cleanedTokens.join("").replace(/[ \t]+/g, " ").trim();
 		if (!paraStr) {
 			if (wrappedLines.length > 0) wrappedLines.push({ tokens: [], widthPx: 0 });
@@ -384,6 +388,12 @@ async function createIqcImage(options) {
 		})
 	);
 
+	const needsCjk = rawTokens.some(
+		(tok) => !/\s/.test(tok) && !quoteEmojiMap.has(tok) && ![...tok].every((c) => textFont.hasGlyph(c))
+	);
+	const cjkFontPath = needsCjk ? await ensureCjkFont().catch(() => null) : null;
+	const cjkFont = cjkFontPath ? loadFont(cjkFontPath) : null;
+
 	// 1. Hitung tata letak bubble & timestamp inline di pojok kanan bawah
 	const maxBubbleW = Math.round(CARD_W * 0.78); // ~343px
 	const bubblePadX = 14;
@@ -391,10 +401,10 @@ async function createIqcImage(options) {
 	const maxContentW = maxBubbleW - bubblePadX * 2;
 
 	let quoteFontSize = 15.5;
-	let wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW);
+	let wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
 	if (wrapped.length > 7) {
 		quoteFontSize = 14;
-		wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW);
+		wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
 	}
 	if (wrapped.length > 10) {
 		wrapped = wrapped.slice(0, 10);
@@ -593,19 +603,21 @@ async function createIqcImage(options) {
 			const lineBaseline = bubbleY + bubblePadY + quoteFontSize * 0.92 + i * lineH;
 			let penX = bubbleX + bubblePadX;
 			let run = "";
+			let runFont = textFont;
+			let runFontPath = sfTextRegPath;
 
 			const flushText = async () => {
 				if (!run) return;
 				await addDrawText({
 					text: run,
-					fontPath: sfTextRegPath,
+					fontPath: runFontPath,
 					size: quoteFontSize,
 					color: "#FFFFFF",
 					xExpr: String(Math.round(penX * SCALE)),
 					baselineY: lineBaseline,
 				});
 				for (const ch of run) {
-					if (textFont.hasGlyph(ch)) penX += textFont.advancePx(ch, quoteFontSize);
+					if (runFont.hasGlyph(ch)) penX += runFont.advancePx(ch, quoteFontSize);
 				}
 				run = "";
 			};
@@ -624,7 +636,23 @@ async function createIqcImage(options) {
 					});
 					penX += quoteFontSize * 1.15;
 				} else {
-					run += tok;
+					for (const ch of tok) {
+						let nextFont = textFont;
+						let nextPath = sfTextRegPath;
+						if (/\s/.test(ch) && run && runFont.hasGlyph(ch)) {
+							nextFont = runFont;
+							nextPath = runFontPath;
+						} else if (!textFont.hasGlyph(ch) && cjkFont && cjkFont.hasGlyph(ch)) {
+							nextFont = cjkFont;
+							nextPath = cjkFontPath;
+						}
+						if (run && nextPath !== runFontPath) {
+							await flushText();
+						}
+						runFont = nextFont;
+						runFontPath = nextPath;
+						run += ch;
+					}
 				}
 			}
 			await flushText();

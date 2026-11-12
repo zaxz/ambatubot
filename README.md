@@ -98,6 +98,7 @@ npm start
 | `.s` / `.sticker` | Mengubah gambar/video menjadi stiker WhatsApp | Kirim gambar dengan caption `.s` atau reply gambar dengan `.s` |
 | `.smeme <atas> \| <bawah>` | Membuat stiker meme dengan teks atas dan bawah | Kirim gambar dengan caption `.smeme KETIKA CODING \| TIBA-TIBA ERROR` |
 | `.brat <teks>` | Membuat stiker teks brat putih: huruf besar rata kanan-kiri, emoji berwarna, efek blur | Kirim `.brat sok iye loe jadi orang 🙏` |
+| `.bratvid <teks>` | Membuat stiker teks brat bergerak kata demi kata (animated WebP) | Kirim `.bratvid sok iye loe jadi orang 🙏` atau reply pesan |
 | `.toimg` | Mengubah stiker menjadi file gambar (PNG) | Reply sebuah stiker dengan `.toimg` |
 | `.iqc <teks>` | Membuat gambar iPhone Quoted Chat (IQC) aesthetic | Kirim `.iqc halo...` / `.iqc aku \| teks` atau reply chat dengan `.iqc` |
 | `.jadwal <kelas> [hari]` | Cek jadwal kuliah IWIMA (hari ini, besok, lusa, semua) | Kirim `.jadwal 3p51 hari ini` atau `.jadwal 3p51 besok` |
