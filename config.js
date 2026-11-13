@@ -49,6 +49,14 @@ module.exports = {
     ]
   },
 
+  // Konfigurasi tanda baca (centang biru) untuk pesan masuk
+  readReceipt: {
+    enabled: true,
+    allMessages: true, // true: semua pesan masuk langsung ditandai dibaca (termasuk obrolan grup)
+    groups: true, // tandai pesan yang masuk di grup
+    privateChat: true // tandai pesan yang masuk di chat pribadi
+  },
+
   // Konfigurasi AI (Google Gemini) untuk balasan mention dengan personalisasi
   ai: {
     enabled: true,

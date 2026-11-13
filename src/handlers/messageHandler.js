@@ -242,6 +242,18 @@ async function handleMessage(sock, m) {
 			}
 		};
 
+		// Otomatis tandai dibaca untuk SEMUA pesan masuk (termasuk obrolan grup yang tidak dibalas)
+		const readCfg = config.readReceipt || {};
+		const nonChatTypes = new Set(["protocolMessage", "senderKeyDistributionMessage", "messageContextInfo", "reactionMessage"]);
+		const autoReadEnabled =
+			readCfg.enabled !== false &&
+			readCfg.allMessages !== false &&
+			(isGroup ? readCfg.groups !== false : readCfg.privateChat !== false) &&
+			!nonChatTypes.has(messageType);
+		if (autoReadEnabled) {
+			await markAsRead();
+		}
+
 
 		// Logging pesan masuk & command (berwarna, bersih tanpa ID WA, jam & tanggal)
 		const time = `${color.dim}[${getTimestamp()}]${color.reset}`;
