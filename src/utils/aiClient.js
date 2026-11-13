@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { getWibDate, searchDosenSchedules } = require('./jadwalHelper');
+const { getWibDate, searchDosenSchedules, getAllDosenNames } = require('./jadwalHelper');
 const jadwalData = require('../assets/jadwal_lengkap.json');
 const kabinetData = require('../assets/kabinet_3p51.json');
 
@@ -30,14 +30,19 @@ function sanitizeWhatsAppFormatting(text) {
 function buildAcademicContext(queryText) {
 	if (!queryText) return '';
 
-	const academicTrigger =
-		/\b(jadwal|kuliah|matkul|mata kuliah|kelas|praktikum|teori|ruang|lab|dosen|pengajar|guru|ngajar|mengajar|ajar|pj|penanggung jawab|kabinet|pengurus|presiden|wakil|sekretaris|bendahara|3p51|statistik|jarkom|dbms|erp|dsi|sia|pbw|web|pkb|inggris)\b|\b[1-8][a-z]\d{2}\b/i;
-	if (!academicTrigger.test(queryText)) return '';
-
 	const sections = [];
 
 	// 1. Pertanyaan seputar dosen: cari di SEMUA kelas (bukan hanya 3P51)
 	const dosenMatches = searchDosenSchedules(queryText);
+	const dosenIntent = /\b(dosen|pak|bapak|bu|ibu|ngajar|mengajar|ajar|pengajar|guru)\b/i.test(queryText);
+
+	const academicTrigger =
+		/\b(jadwal|kuliah|matkul|mata kuliah|kelas|praktikum|teori|ruang|lab|dosen|pengajar|guru|ngajar|mengajar|ajar|pj|penanggung jawab|kabinet|pengurus|presiden|wakil|sekretaris|bendahara|3p51|statistik|jarkom|dbms|erp|dsi|sia|pbw|web|pkb|inggris)\b|\b[1-8][a-z]\d{2}\b/i;
+
+	// Nama dosen yang cocok kuat (mis. "kalo bu amanah?") tetap diproses walau tanpa kata kunci akademik
+	const strongDosenMatch = dosenMatches.length > 0 && dosenMatches[0].score >= 6;
+	if (!academicTrigger.test(queryText) && !strongDosenMatch) return '';
+
 	if (dosenMatches.length > 0) {
 		const institusi = jadwalData.meta?.institusi || 'IWIMA';
 		const topMatches = dosenMatches.slice(0, 3);
@@ -59,7 +64,19 @@ function buildAcademicContext(queryText) {
 		}
 
 		sections.push(
-			`[PETUNJUK DOSEN] Jika ditanya "sedang/lagi ngajar di kelas mana", bandingkan hari & jam pada data di atas dengan WIB sekarang (${getWibDate().full}, lihat jam server di atas). Jika tidak ada sesi yang cocok, sebutkan jadwal terdekat berikutnya. DILARANG menyebut dosen/kelas lain di luar data ini.`
+			`[PETUNJUK DOSEN — WAJIB DIPATUHI] Data dosen di atas HASIL PENCARIAN SISTEM dan otomatis benar; dosen tersebut ADA di data. ` +
+				`DILARANG menjawab "tidak ada di database", dilarang mengarang daftar dosen lain, dan dilarang menyebut dosen/kelas di luar data ini. ` +
+				`Untuk pertanyaan "tadi/lagi/sedang ngajar di kelas mana", bandingkan hari & jam di data dengan WIB sekarang (${getWibDate().full}); ` +
+				`jika tidak ada sesi pada jam tersebut, sebutkan sesi terdekat (sebelum/sesudahnya) beserta kelas, ruang, dan matkulnya. ` +
+				`Sebutkan SEMUA kelas yang diajar bila diminta daftar kelas.`
+		);
+	} else if (dosenIntent) {
+		const names = getAllDosenNames();
+		sections.push(
+			`[DAFTAR NAMA DOSEN YANG ADA DI DATA (${names.length} orang)]\n${names.join('; ')}\n` +
+				`[PETUNJUK DOSEN] Tidak ada nama yang cocok dari pencarian otomatis untuk kata kunci pada pesan terakhir. ` +
+				`Periksa kembali daftar nama di atas secara manual (perhatikan kemiripan ejaan/nama panggilan). ` +
+				`Jika memang tidak ada, katakan datanya belum tersedia di bot — DILARANG mengklaim "database hanya berisi dosen tertentu" dan dilarang mengarang nama.`
 		);
 	}
 

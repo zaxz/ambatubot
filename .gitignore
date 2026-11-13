@@ -1,6 +1,11 @@
 # Dependencies
 node_modules/
 
+# Lockfile sengaja tidak dilacak: npm install di Linux (panel) menulis ulang file ini
+# sehingga `git pull` auto-update selalu gagal ("local changes to package-lock.json").
+# Versi dependency dikunci lewat package.json; .npmrc mematikan pembuatan lockfile.
+package-lock.json
+
 # Sensitive Environment & Credentials
 .env
 session/

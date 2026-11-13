@@ -116,6 +116,24 @@ async function startBot() {
     try { return require('@whiskeysockets/baileys/package.json').version; } catch { return 'unknown'; }
   })();
   console.log(`Library: @whiskeysockets/baileys v${baileysVersion} (Node ${process.version})`);
+
+  // Info versi kode terpasang: memastikan auto-update panel benar-benar menarik commit terbaru
+  const codeInfo = (() => {
+    try {
+      const { execFileSync } = require('child_process');
+      const git = (...args) =>
+        execFileSync('git', args, { cwd: __dirname, encoding: 'utf8', timeout: 5000 }).trim();
+      const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
+      const commit = git('rev-parse', '--short', 'HEAD');
+      const dirty = git('status', '--porcelain').split('\n').filter(Boolean);
+      if (dirty.length === 0) return `${branch}@${commit}`;
+      const sample = dirty.slice(0, 3).map((l) => l.trim()).join(', ');
+      return `${branch}@${commit} | ⚠️ ${dirty.length} file lokal berubah (bisa memblokir auto-update): ${sample}`;
+    } catch {
+      return 'tidak diketahui (bukan repo git)';
+    }
+  })();
+  console.log(`Kode: ${codeInfo}`);
   console.log('======================================================\n');
 
   // Ambil versi Baileys terbaru dari server WhatsApp

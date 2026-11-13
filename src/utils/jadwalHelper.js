@@ -430,9 +430,18 @@ function formatDosenInfo(query, prefix = ".") {
 	return text.trim();
 }
 
+/**
+ * Daftar seluruh nama dosen yang ada di data jadwal (untuk konteks AI).
+ * @returns {Array<string>}
+ */
+function getAllDosenNames() {
+	return [...dosenScheduleMap.keys()].sort((a, b) => a.localeCompare(b));
+}
+
 module.exports = {
 	getJadwalKuliah,
 	getWibDate,
 	searchDosenSchedules,
 	formatDosenInfo,
+	getAllDosenNames,
 };
