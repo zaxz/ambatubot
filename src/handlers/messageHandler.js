@@ -229,6 +229,19 @@ async function handleMessage(sock, m) {
 		const prefix = config.botPrefix;
 		const isCommand = trimmedBody.startsWith(prefix);
 
+		// Tandai pesan sudah dibaca (centang biru) sekali saja per pesan, hanya saat bot menanggapi
+		let hasMarkedRead = false;
+		const markAsRead = async () => {
+			if (hasMarkedRead) return;
+			hasMarkedRead = true;
+			if (typeof sock.readMessages !== "function") return;
+			try {
+				await sock.readMessages([m.key]);
+			} catch (e) {
+				// Abaikan kegagalan read receipt agar proses utama tetap berjalan
+			}
+		};
+
 
 		// Logging pesan masuk & command (berwarna, bersih tanpa ID WA, jam & tanggal)
 		const time = `${color.dim}[${getTimestamp()}]${color.reset}`;
@@ -250,6 +263,7 @@ async function handleMessage(sock, m) {
 		const quotedType = quotedMsg ? (getContentType(quotedMsg) || Object.keys(quotedMsg)[0]) : null;
 		// Helper untuk membalas pesan dengan quote otomatis
 		const reply = async (text) => {
+			await markAsRead();
 			await sock.sendMessage(from, { text }, { quoted: m });
 		};
 
@@ -260,6 +274,9 @@ async function handleMessage(sock, m) {
 			const args = trimmedBody.slice(prefix.length).trim().split(/ +/);
 			const command = args[0].toLowerCase();
 			const text = args.slice(1).join(" ");
+
+			// Command dianggap "dibaca" bot, termasuk perintah yang mengirim media tanpa teks
+			await markAsRead();
 
 			await handleCase({
 				sock,
@@ -314,6 +331,9 @@ async function handleMessage(sock, m) {
 			const lastAi = aiCooldownMap.get(cooldownKey) || 0;
 			if (now - lastAi >= config.ai.cooldownMs) {
 				aiCooldownMap.set(cooldownKey, now);
+
+				// Bot membaca pesan sebelum membalas AI
+				await markAsRead();
 
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
@@ -401,6 +421,7 @@ async function handleMessage(sock, m) {
 
 			const autoReplyText = checkAutoReply(trimmedBody, sender, pushName);
 			if (autoReplyText) {
+				await markAsRead();
 				// Berikan indikator visual 'sedang mengetik...' sejenak agar terlihat natural
 				await sock.sendPresenceUpdate("composing", from);
 				setTimeout(async () => {
