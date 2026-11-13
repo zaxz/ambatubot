@@ -972,7 +972,7 @@ async function createBratSticker(text) {
 
 const BRATVID_MAX_STEPS = 18;
 const BRATVID_CONCURRENCY = 4;
-const BRATVID_FINAL_HOLD_MS = 1400;
+const BRATVID_FINAL_HOLD_MS = 2800
 const BRATVID_MAX_SIZE_BYTES = 950 * 1024;
 
 /**

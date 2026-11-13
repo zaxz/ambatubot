@@ -323,7 +323,16 @@ async function handleMessage(sock, m) {
 
 			// Command dianggap "dibaca" bot, termasuk perintah yang mengirim media tanpa teks
 			await markAsRead();
-
+			// Command fitur berat (stiker & media) memotong limit harian; info command tetap gratis
+			const HEAVY_COMMANDS = new Set(["s", "sticker", "stiker", "smeme", "stickermeme", "stikermeme", "brat", "bratstiker", "bratsticker", "bratvid", "bratvideo", "bratgif", "toimg", "iqc", "iphonequote", "iphonechat"]);
+			if (limitEnabled && !isOwner && HEAVY_COMMANDS.has(command)) {
+				const cmdLimitInfo = getLimitInfo(limitUserId);
+				if (cmdLimitInfo.remaining <= 0) {
+					await sendLimitNotice(cmdLimitInfo);
+					return;
+				}
+				consumeLimit(limitUserId);
+			}
 			await handleCase({
 				sock,
 				m,
