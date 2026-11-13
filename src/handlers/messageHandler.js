@@ -3,11 +3,14 @@ const config = require("../../config");
 const { checkAutoReply } = require("./autoReplyHandler");
 const { generateReply } = require("../utils/aiClient");
 const { downloadMediaBuffer, webpToImage } = require("../utils/mediaHelper");
+const { getLimitInfo, consumeLimit } = require("../utils/limitHelper");
 const handleCase = require("../case");
 
 const startTime = Date.now();
 // Memory cache untuk rate-limiting AI per chat (agar tidak spam jika disebut berulang)
 const aiCooldownMap = new Map();
+// Cache agar peringatan "limit habis" tidak dikirim berulang-ulang ke user yang sama
+const limitNoticeMap = new Map();
 // Memori chat singkat per percakapan agar AI nyambung dengan konteks sebelumnya
 const chatHistoryMap = new Map();
 const MAX_HISTORY_MESSAGES = 10;
@@ -132,6 +135,21 @@ const color = {
 const groupNameCache = new Map();
 
 /**
+ * Pesan yang dikirim saat kuota chat harian user habis.
+ * @param {{used: number, limit: number}} info
+ */
+function buildLimitNotice(info) {
+	const ownerNumber = (config.ownerNumbers || [])[0] || "";
+	const ownerName = config.ownerName || "owner";
+	const waLink = ownerNumber ? `wa.me/${ownerNumber}` : "";
+	return (
+		`⚠️ *Limit chat harian kamu habis* (${info.used}/${info.limit} terpakai).\n\n` +
+		`Limit akan direset otomatis setiap pukul *00.00 WIB*.\n` +
+		`Mau nambah limit sekarang? Chat ${ownerName}${waLink ? `: ${waLink}` : ""} biar limitnya ditambahin.`
+	);
+}
+
+/**
  * Format waktu saat ini di zona waktu WIB (UTC+7)
  */
 function getTimestamp() {
@@ -217,6 +235,12 @@ async function handleMessage(sock, m) {
 			.filter(Boolean)
 			.map((jid) => jid.split(":")[0].replace(/[^0-9]/g, ""));
 		const isOwner = config.ownerNumbers.some((num) => senderNumbers.includes(num.replace(/[^0-9]/g, "")));
+
+		// Identitas limit harian: utamakan nomor HP (PN), fallback ke JID pengirim
+		const pnIdentity =
+			m.key.participantAlt || m.key.remoteJidAlt || senderPnAlt || (String(sender).endsWith("@lid") ? "" : sender);
+		const limitUserId = String(pnIdentity || sender || from).split(":")[0].replace(/[^0-9]/g, "");
+		const limitEnabled = config.chatLimit?.enabled !== false;
 		// Ekstraksi pesan aktual (antisipasi ephemeral & viewOnce wrapper)
 		let msg = unwrapMessage(m.message);
 		if (!msg) return;
@@ -279,6 +303,16 @@ async function handleMessage(sock, m) {
 			await sock.sendMessage(from, { text }, { quoted: m });
 		};
 
+		// Kirim peringatan limit habis (dibatasi cooldown agar tidak spam)
+		const sendLimitNotice = async (info) => {
+			const rawCooldown = config.chatLimit?.noticeCooldownMs;
+			const cooldown = Number.isFinite(Number(rawCooldown)) ? Math.max(0, Number(rawCooldown)) : 60000;
+			const lastNotice = limitNoticeMap.get(limitUserId) || 0;
+			if (Date.now() - lastNotice < cooldown) return;
+			limitNoticeMap.set(limitUserId, Date.now());
+			await reply(buildLimitNotice(info)).catch(() => {});
+		};
+
 		// =========================================================================
 		// 1. ROUTING COMMAND (JIKA DIAWALI PREFIX MISAL '.')
 		// =========================================================================
@@ -311,6 +345,7 @@ async function handleMessage(sock, m) {
 				startTime,
 				botJid,
 				botLid,
+				limitUserId,
 			});
 			return;
 		}
@@ -346,6 +381,16 @@ async function handleMessage(sock, m) {
 
 				// Bot membaca pesan sebelum membalas AI
 				await markAsRead();
+
+				// Cek limit chat harian (owner bebas limit)
+				if (limitEnabled && !isOwner) {
+					const limitInfo = getLimitInfo(limitUserId);
+					if (limitInfo.remaining <= 0) {
+						console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.yellow}[LIMIT]${color.reset} ${color.bold}[${pushName}]${color.reset} kuota habis (${limitInfo.used}/${limitInfo.limit})`);
+						await sendLimitNotice(limitInfo);
+						return;
+					}
+				}
 
 				// Indikator 'sedang mengetik...' (best-effort, tidak blokir balasan)
 				try {
@@ -400,6 +445,12 @@ async function handleMessage(sock, m) {
 						config,
 					});
 					await sock.sendMessage(from, { text: aiReply }, { quoted: m });
+					if (limitEnabled && !isOwner) {
+						const after = consumeLimit(limitUserId);
+						if (after) {
+							console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.yellow}[LIMIT]${color.reset} ${color.bold}[${pushName}]${color.reset} sisa ${after.remaining}/${after.limit}`);
+						}
+					}
 					const userHistoryText = isGroup ? `[${pushName}]: ${cleanMessage}` : cleanMessage;
 					appendChatHistory(from, "user", userHistoryText);
 					appendChatHistory(from, "model", aiReply);
@@ -433,6 +484,17 @@ async function handleMessage(sock, m) {
 
 			const autoReplyText = checkAutoReply(trimmedBody, sender, pushName);
 			if (autoReplyText) {
+				// Auto-reply termasuk "chat" bila countAutoReply aktif
+				const countAutoReply = config.chatLimit?.countAutoReply !== false;
+				if (limitEnabled && !isOwner && countAutoReply) {
+					const limitInfo = getLimitInfo(limitUserId);
+					if (limitInfo.remaining <= 0) {
+						await sendLimitNotice(limitInfo);
+						return;
+					}
+					consumeLimit(limitUserId);
+				}
+
 				await markAsRead();
 				// Berikan indikator visual 'sedang mengetik...' sejenak agar terlihat natural
 				await sock.sendPresenceUpdate("composing", from);

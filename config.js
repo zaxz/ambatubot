@@ -57,6 +57,14 @@ module.exports = {
     privateChat: true // tandai pesan yang masuk di chat pribadi
   },
 
+  // Konfigurasi limit chat harian per pengguna (reset otomatis pukul 00.00 WIB)
+  chatLimit: {
+    enabled: true,
+    defaultLimit: 20, // kuota chat default per hari untuk non-owner
+    countAutoReply: true, // pesan auto-reply (FAQ) juga dihitung sebagai chat
+    noticeCooldownMs: 60000 // jeda minimal antar peringatan "limit habis" per user
+  },
+
   // Konfigurasi AI (Google Gemini) untuk balasan mention dengan personalisasi
   ai: {
     enabled: true,

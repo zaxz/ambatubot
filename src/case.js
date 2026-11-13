@@ -13,6 +13,13 @@ const {
 const { getJadwalKuliah, formatDosenInfo, searchDosenSchedules } = require("./utils/jadwalHelper");
 const { getPjMatkul } = require("./utils/pjHelper");
 const { createIqcImage } = require("./utils/iqcHelper");
+const {
+	getLimitInfo,
+	setUserLimit,
+	listUserLimits,
+	normalizeUserId,
+	defaultLimit,
+} = require("./utils/limitHelper");
 
 /**
  * Format durasi waktu ke teks terbaca (hari, jam, menit, detik)
@@ -56,6 +63,7 @@ async function handleCase(context) {
 		quotedType,
 		reply,
 		startTime,
+		limitUserId,
 	} = context;
 
 	// Helper untuk memberi reaksi emoji ke pesan masuk (best-effort)
@@ -83,7 +91,9 @@ async function handleCase(context) {
 				? `┣━━━❰ 📢 *OWNER* ❱━━━┫\n` +
 				  `┃ • *${prefix}listgrup* - Daftar grup bot (Owner)\n` +
 				  `┃ • *${prefix}join* <link> - Gabung ke grup (Owner)\n` +
-				  `┃ • *${prefix}leave* [no/id] - Keluar grup (Owner)\n`
+				  `┃ • *${prefix}leave* [no/id] - Keluar grup (Owner)\n` +
+				  `┃ • *${prefix}setlimit* <nomor> <limit> - Set/tambah limit user\n` +
+				  `┃ • *${prefix}listuser* - Sisa limit semua user\n`
 				: "";
 			const menuText = `╭━━━❰ *${config.botName}* ❱━━━╮
 ┃
@@ -115,6 +125,7 @@ async function handleCase(context) {
 ┣━━━❰ ⚡ *INFO & SISTEM* ❱━━━┫
 ┃ • *${prefix}ping* - Cek respon & latensi
 ┃ • *${prefix}runtime* - Status server & RAM
+┃ • *${prefix}limit* - Sisa limit chat harianmu
 ${ownerSection}┃
 ╰━━━━━━━━━━━━━━━━━╯
 _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
@@ -141,6 +152,35 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 			const memUsed = Math.round(mem.rss / 1024 / 1024);
 			const statusText = `📊 *STATUS SISTEM BOT:*\n• *Uptime:* ${uptime}\n• *Node.js:* ${process.version}\n• *RAM Usage:* ${memUsed} MB\n• *Platform:* ${process.platform} (${process.arch})`;
 			await reply(statusText);
+			break;
+		}
+
+		// =========================================================================
+		// CEK LIMIT CHAT HARIAN (.limit)
+		// =========================================================================
+		case "limit":
+		case "limitku":
+		case "ceklimit": {
+			if (isOwner) {
+				return await reply(
+					`👑 *Owner bebas limit chat.*\n\n` +
+						`• Kuota harian user lain: *${defaultLimit()} chat/hari*\n` +
+						`• Reset otomatis: *00.00 WIB*\n\n` +
+						`Kelola limit:\n` +
+						`• *${prefix}setlimit <nomor> <jumlah>* (tambah: *+10*)\n` +
+						`• *${prefix}listuser*`
+				);
+			}
+
+			const info = getLimitInfo(limitUserId);
+			await reply(
+				`🎟️ *LIMIT CHAT HARIAN*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+					`• 👤 *Nomor:* ${info.userId || "-"}\n` +
+					`• ✅ *Sisa limit:* ${info.remaining}/${info.limit}\n` +
+					`• 💬 *Terpakai hari ini:* ${info.used}\n\n` +
+					`⏰ _Reset otomatis setiap pukul 00.00 WIB._\n` +
+					`➕ _Limit habis? Chat owner untuk minta tambahan._`
+			);
 			break;
 		}
 
@@ -510,6 +550,107 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				await react("❌");
 				await reply(`❌ Gagal membuat gambar iqc: ${err.message}`);
 			}
+			break;
+		}
+
+		// =========================================================================
+		// KELOLA LIMIT USER (.setlimit / .listuser - KHUSUS OWNER)
+		// =========================================================================
+		case "setlimit":
+		case "tambahlimit": {
+			if (!isOwner) {
+				return await reply("⛔ Perintah ini hanya dapat digunakan oleh Pemilik (Owner) Bot!");
+			}
+
+			const parts = (text || "").trim().split(/\s+/).filter(Boolean);
+			if (parts.length < 2) {
+				return await reply(
+					`⚠️ *Format salah!*\n\n` +
+						`• *${prefix}setlimit <nomor> <jumlah>* — set sisa limit hari ini\n` +
+						`• *${prefix}setlimit <nomor> +<jumlah>* — tambah dari sisa saat ini\n\n` +
+						`Contoh:\n• *${prefix}setlimit 6281234567890 25*\n• *${prefix}setlimit 6281234567890 +10*`
+				);
+			}
+
+			let target = normalizeUserId(parts[0]);
+			if (target.startsWith("0")) target = `62${target.slice(1)}`;
+			const rawAmount = parts[1];
+			const isAdd = rawAmount.startsWith("+");
+			const amount = Number(rawAmount.replace("+", ""));
+
+			if (target.length < 10) {
+				return await reply(`⚠️ Nomor *${parts[0]}* tidak valid. Gunakan format kode negara tanpa +, misal *6281234567890*.`);
+			}
+			if (!Number.isFinite(amount) || amount < 0) {
+				return await reply(`⚠️ Jumlah limit *${rawAmount}* tidak valid. Contoh: *${prefix}setlimit ${target} 25*`);
+			}
+
+			const result = setUserLimit(target, amount, { add: isAdd });
+			if (!result) {
+				return await reply("❌ Gagal menyimpan limit. Coba lagi.");
+			}
+
+			const modeLabel = isAdd ? `➕ *Ditambahkan:* ${amount}` : `✏️ *Diset ke:* ${amount}`;
+			await reply(
+				`✅ *Limit diperbarui*\n━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+					`• 👤 *Nomor:* ${result.userId}\n` +
+					`• 🎟️ *Sisa limit hari ini:* ${result.remaining}/${result.limit}\n` +
+					`• 💬 *Terpakai:* ${result.used}\n` +
+					`• ${modeLabel}`
+			);
+
+			// Beri tahu user yang bersangkutan (best-effort)
+			try {
+				await sock.sendMessage(`${target}@s.whatsapp.net`, {
+					text:
+						`🎉 *Limit chat kamu ditambah owner!*\n\n` +
+						`• 🎟️ *Sisa limit:* ${result.remaining}/${result.limit}\n` +
+						`• ⏰ *Reset otomatis:* 00.00 WIB\n\n` +
+						`Cek kapan saja dengan *${prefix}limit*.`,
+				});
+				await reply(`📨 Notifikasi limit terkirim ke *+${target}*.`);
+			} catch (err) {
+				await reply(`⚠️ Limit tersimpan, tapi notifikasi ke *+${target}* gagal dikirim (nomor mungkin belum pernah chat bot).`);
+			}
+			break;
+		}
+
+		case "listuser":
+		case "listlimit": {
+			if (!isOwner) {
+				return await reply("⛔ Perintah ini hanya dapat digunakan oleh Pemilik (Owner) Bot!");
+			}
+
+			const users = listUserLimits();
+			if (users.length === 0) {
+				return await reply(
+					`ℹ️ Belum ada user yang tercatat hari ini.\n\n` +
+						`Kuota default: *${defaultLimit()} chat/hari* (reset 00.00 WIB).\n` +
+						`Tambah limit: *${prefix}setlimit <nomor> <jumlah>*`
+				);
+			}
+
+			const shown = users.slice(0, 40);
+			const lines = shown.map((u, idx) => {
+				const status = u.remaining <= 0 ? "⛔ habis" : `✅ ${u.remaining}/${u.limit}`;
+				return `${idx + 1}. *${u.userId}* — ${status} (terpakai ${u.used})`;
+			});
+
+			let body =
+				`👥 *DAFTAR LIMIT USER HARI INI*\n━━━━━━━━━━━━━━━━━━━━━━━\n` +
+				`📅 Reset otomatis 00.00 WIB\n\n` +
+				`${lines.join("\n")}`;
+
+			if (users.length > shown.length) {
+				body += `\n\n_…dan ${users.length - shown.length} user lainnya._`;
+			}
+
+			const habis = users.filter((u) => u.remaining <= 0).length;
+			body += `\n\n━━━━━━━━━━━━━━━━━━━━━━━\n`;
+			body += `📊 *Total:* ${users.length} user | ⛔ habis: ${habis}\n`;
+			body += `➕ Tambah: *${prefix}setlimit <nomor> <jumlah>*`;
+
+			await reply(body);
 			break;
 		}
 

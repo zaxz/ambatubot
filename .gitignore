@@ -10,6 +10,9 @@ package-lock.json
 .env
 session/
 
+# Data runtime (state limit chat harian, dll)
+data/
+
 # Logs & Debug
 *.log
 npm-debug.log*

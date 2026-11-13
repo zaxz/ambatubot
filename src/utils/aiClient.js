@@ -246,6 +246,7 @@ async function generateReply({ message, senderName, groupName, history = [], quo
 		`  • Cek PJ Matkul & Dosen: Ketik "${prefix}pj <kelas> <matkul>" (contoh: "${prefix}pj 3p51 statistik").`,
 		`  • Cari Dosen Lintas Kelas: Ketik "${prefix}dosen <nama>" (contoh: "${prefix}dosen moses"). Bisa juga ditanya bebas seperti "pak moses lagi ngajar di kelas mana?".`,
 		`  • Menu & Bantuan: Ketik "${prefix}menu".`,
+		`  • Cek Sisa Limit Chat: Ketik "${prefix}limit". Kuota harian dibatasi dan reset pukul 00.00 WIB; jika habis, pengguna harus chat owner untuk minta tambahan.`,
 		`  • Cek Kecepatan/Server: Ketik "${prefix}ping" atau "${prefix}runtime".`,
 	];
 
