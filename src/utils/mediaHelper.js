@@ -157,7 +157,21 @@ async function webpToImage(webpBuffer) {
 	const outputPath = path.join(tmpDir, `stk_out_${Date.now()}_${Math.random().toString(36).substring(7)}.png`);
 
 	try {
-		await fs.promises.writeFile(inputPath, webpBuffer);
+		// FFmpeg tidak bisa decode WebP animasi (chunk ANIM/ANMF dilewati), jadi ambil
+		// frame pertama lewat node-webpmux lalu konversi frame statis itu ke PNG.
+		let sourceBuffer = webpBuffer;
+		try {
+			const probe = new webp.Image();
+			await probe.load(webpBuffer);
+			if (probe.hasAnim && probe.frames?.length) {
+				const frames = await probe.demux({ buffers: true });
+				if (frames?.[0]?.length) sourceBuffer = frames[0];
+			}
+		} catch (e) {
+			// Jika webpmux gagal, biarkan FFmpeg mencoba buffer aslinya
+		}
+
+		await fs.promises.writeFile(inputPath, sourceBuffer);
 		await runFfmpeg(["-y", "-i", inputPath, "-vframes", "1", outputPath]);
 		const result = await fs.promises.readFile(outputPath);
 		return result;
