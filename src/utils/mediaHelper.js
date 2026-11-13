@@ -986,7 +986,7 @@ async function createBratSticker(text) {
 
 const BRATVID_MAX_STEPS = 18;
 const BRATVID_CONCURRENCY = 4;
-const BRATVID_FINAL_HOLD_MS = 2800
+const BRATVID_FINAL_HOLD_MS = 2000;
 const BRATVID_MAX_SIZE_BYTES = 950 * 1024;
 
 /**
@@ -1050,10 +1050,14 @@ async function createBratVideoSticker(text, maxDurationSeconds = 9) {
 
 	const stepCount = stepDescriptors.length;
 	const maxTotalMs = Math.min(maxDurationSeconds, 9) * 1000;
-	const finalDelayMs = Math.min(BRATVID_FINAL_HOLD_MS, Math.max(800, maxTotalMs - (stepCount - 1) * 180));
-	const availableStepMs = Math.max(200, maxTotalMs - finalDelayMs);
+	// Jeda antar kata dibuat seragam; setelah kata terakhir tampil, frame-nya
+	// diduplikasi sebagai frame "diam" agar terlihat berhenti sebelum loop ulang.
+	const holdMs = Math.max(800, Math.min(BRATVID_FINAL_HOLD_MS, maxTotalMs - (stepCount - 1) * 180));
 	const rawStepDelay = stepCount <= 5 ? 420 : stepCount <= 10 ? 340 : Math.round(4500 / (stepCount - 1));
-	const stepDelayMs = Math.max(180, Math.min(rawStepDelay, Math.floor(availableStepMs / Math.max(1, stepCount - 1))));
+	const stepDelayMs = Math.max(
+		180,
+		Math.min(rawStepDelay, Math.floor((maxTotalMs - holdMs) / Math.max(1, stepCount - 1)))
+	);
 
 	const renderAllFrames = async (quality) => {
 		const buffers = new Array(stepCount);
@@ -1072,16 +1076,24 @@ async function createBratVideoSticker(text, maxDurationSeconds = 9) {
 
 		const frames = [];
 		for (let i = 0; i < buffers.length; i++) {
-			const delay = i === buffers.length - 1 ? finalDelayMs : stepDelayMs;
 			frames.push(
 				await webp.Image.generateFrame({
 					buffer: buffers[i],
-					delay,
+					delay: stepDelayMs,
 					blend: false,
 					dispose: true,
 				})
 			);
 		}
+		// Duplikat frame terakhir: semua kata sudah tampil, tahan sejenak sebelum loop
+		frames.push(
+			await webp.Image.generateFrame({
+				buffer: buffers[buffers.length - 1],
+				delay: holdMs,
+				blend: false,
+				dispose: true,
+			})
+		);
 
 		return await webp.Image.save(null, {
 			frames,
