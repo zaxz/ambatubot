@@ -20,6 +20,13 @@ function sanitizeWhatsAppFormatting(text) {
 	str = str.replace(/<[^>]+>/g, ""); // bersihkan tag HTML sisa
 	str = str.replace(/^#{1,6}\s*(.+)$/gm, "*$1*");
 	str = str.replace(/\*\*([^*]+)\*\*/g, "*$1*");
+	// Buang semua emoji (pictographic, variation selector, ZWJ, skin tone, flag)
+	str = str.replace(
+		/[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2190}-\u{21FF}\u{2300}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{FE0E}\u{200D}\u{1F3FB}-\u{1F3FF}\u{20E3}]/gu,
+		""
+	);
+	// Rapikan sisa spasi ganda / spasi sebelum tanda baca akibat emoji yang dibuang
+	str = str.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+([,.!?;:])/g, "$1").replace(/[ \t]+\n/g, "\n");
 	return str.trim();
 }
 
