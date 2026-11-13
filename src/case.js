@@ -10,7 +10,7 @@ const {
 	createBratSticker,
 	createBratVideoSticker,
 } = require("./utils/mediaHelper");
-const { getJadwalKuliah } = require("./utils/jadwalHelper");
+const { getJadwalKuliah, formatDosenInfo, searchDosenSchedules } = require("./utils/jadwalHelper");
 const { getPjMatkul } = require("./utils/pjHelper");
 const { createIqcImage } = require("./utils/iqcHelper");
 
@@ -109,6 +109,8 @@ async function handleCase(context) {
 ┃   _Cek jadwal (hari ini, besok, lusa, semua)._
 ┃ • *${prefix}pj* <kelas> <matkul>
 ┃   _Cek PJ matkul & nomor WA dosen._
+┃ • *${prefix}dosen* <nama>
+┃   _Cari kelas & jadwal mengajar dosen (semua kelas)._
 ┃
 ┣━━━❰ ⚡ *INFO & SISTEM* ❱━━━┫
 ┃ • *${prefix}ping* - Cek respon & latensi
@@ -157,10 +159,41 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 		// PENANGGUNG JAWAB MATKUL (.pj <kelas> <matkul>)
 		// =========================================================================
 		case "pj":
-		case "pjmatkul":
-		case "dosen": {
+		case "pjmatkul": {
+			const rawQuery = (text || "").trim();
+			// Tanpa kode kelas di awal → anggap pencarian dosen lintas kelas
+			const startsWithClassCode = /^[1-8]\s?[a-z]\s?\d{2}/i.test(rawQuery);
+			if (rawQuery && !startsWithClassCode && searchDosenSchedules(rawQuery).length > 0) {
+				await reply(formatDosenInfo(rawQuery, prefix));
+				break;
+			}
 			const result = getPjMatkul(text, prefix);
 			await reply(result);
+			break;
+		}
+
+		// =========================================================================
+		// CARI DOSEN: KELAS & JADWAL MENGAJAR DI SEMUA KELAS (.dosen <nama>)
+		// =========================================================================
+		case "dosen":
+		case "caridosen":
+		case "dosenmana": {
+			const keyword = (text || "").trim();
+			if (!keyword) {
+				return await reply(
+					`👨‍🏫 *CARI DOSEN (SEMUA KELAS)*\n\nContoh penggunaan:\n` +
+					`• *${prefix}dosen moses*\n` +
+					`• *${prefix}dosen widiyono*\n` +
+					`• *${prefix}dosen eko budi*\n\n` +
+					`Atau tanya bebas ke bot: _"pak moses lagi ngajar di kelas mana?"_`
+				);
+			}
+			// Kompatibilitas lama: ".dosen <kelas> <matkul>" tetap menampilkan data PJ
+			if (/^[1-8]\s?[a-z]\s?\d{2}/i.test(keyword)) {
+				await reply(getPjMatkul(keyword, prefix));
+				break;
+			}
+			await reply(formatDosenInfo(keyword, prefix));
 			break;
 		}
 

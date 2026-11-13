@@ -1,4 +1,5 @@
 const jadwalData = require("../assets/jadwal_lengkap.json");
+const kabinetData = require("../assets/kabinet_3p51.json");
 
 const daysMap = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
 const monthsMap = [
@@ -241,7 +242,197 @@ function getJadwalKuliah(text, prefix = ".") {
 	return formatSingleDaySchedule(cleanKelas, targetDay, label, filtered, prefix);
 }
 
+/**
+ * Alias panggilan/nama umum → potongan nama resmi di data jadwal.
+ */
+const DOSEN_ALIASES = {
+	moses: "mosses",
+	mosess: "mosses",
+	widi: "widiyono",
+	taufiq: "taufiqurrohman",
+	tofiq: "taufiqurrohman",
+	opik: "taufiqurrohman",
+	titian: "tria",
+	ipung: "ichwan",
+	heru: "heru",
+};
+
+/**
+ * Membuang gelar akademik dan tanda baca dari nama dosen.
+ * @param {string} name
+ * @returns {string} nama inti huruf kecil tanpa gelar
+ */
+function cleanDosenName(name) {
+	if (!name) return "";
+	return String(name)
+		.replace(/\b(dr|prof)\.?\s+/gi, "")
+		.replace(/,\s*[a-z.\s]+/gi, " ")
+		.replace(
+			/\b(st|skm|se|spd|mpd|mkom|skom|mm|mhum|mcs|msi|mh|mipol|akt|s\.t|m\.kom|s\.kom|m\.pd|s\.pd|s\.e|m\.m|m\.hum|m\.cs|m\.si|m\.h|s\.si|m\.si\.akt)\b/gi,
+			" "
+		)
+		.replace(/[^a-zA-Z\s]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.toLowerCase();
+}
+
+/**
+ * Kata yang bukan bagian nama dosen pada pertanyaan bebas,
+ * mis. "pak moses lagi ngajar di kelas mana?".
+ */
+const QUERY_STOPWORDS =
+	/\b(pak|bapak|bu|ibu|dosen|pengajar|guru|lagi|sedang|ngajar|mengajar|ajar|mengajar|di|kelas|mana|apa|saja|aja|jadwal|kuliah|matkul|mata|hari|ini|besok|lusa|kapan|ruang|siapa|yang|ada|kah|tolong|cek|info|tanya|soal|dan|juga|sekarang|jam|berapa|semua)\b/gi;
+
+/**
+ * Mengelompokkan seluruh entri jadwal per nama dosen (di-cache sekali).
+ * @returns {Map<string, Array<Object>>}
+ */
+const dosenScheduleMap = (() => {
+	const map = new Map();
+	for (const item of jadwalData.jadwal || []) {
+		const dosen = (item.dosen || "").trim();
+		if (!dosen || dosen.toLowerCase() === "gabung") continue;
+		if (!map.has(dosen)) map.set(dosen, []);
+		map.get(dosen).push(item);
+	}
+	return map;
+})();
+
+/**
+ * Mencari nomor WA dosen pada data kabinet berdasarkan nama (butuh minimal 2 kata sama).
+ * @param {string} dosenName
+ */
+function findDosenContact(dosenName) {
+	const norm = cleanDosenName(dosenName).split(" ").filter((t) => t.length >= 3);
+	if (norm.length === 0) return null;
+
+	for (const kd of kabinetData.dosen || []) {
+		const kdNorm = cleanDosenName(kd.nama);
+		if (kdNorm === cleanDosenName(dosenName)) return kd.nomorTelepon || null;
+		const kdTokens = new Set(kdNorm.split(" ").filter((t) => t.length >= 3));
+		const shared = norm.filter((t) => kdTokens.has(t)).length;
+		if (shared >= 2) return kd.nomorTelepon || null;
+	}
+	return null;
+}
+
+/**
+ * Mencari dosen dan seluruh jadwal mengajarnya di SEMUA kelas.
+ * @param {string} rawQuery - teks bebas, mis. "pak moses lagi ngajar di kelas mana"
+ * @returns {Array<{dosen: string, kontak: string|null, score: number, schedules: Array<Object>}>}
+ */
+function searchDosenSchedules(rawQuery) {
+	if (!rawQuery || !String(rawQuery).trim()) return [];
+
+	const cleaned = String(rawQuery)
+		.toLowerCase()
+		.replace(QUERY_STOPWORDS, " ")
+		.replace(/[^a-z0-9\s]/g, " ")
+		.replace(/\s+/g, " ")
+		.trim();
+
+	const rawTokens = cleaned.split(" ").filter((t) => t.length >= 3);
+	if (rawTokens.length === 0) return [];
+
+	const queryTerms = [];
+	for (const token of rawTokens) {
+		queryTerms.push(token);
+		if (DOSEN_ALIASES[token]) queryTerms.push(DOSEN_ALIASES[token]);
+	}
+
+	const matches = [];
+	for (const [dosenName, items] of dosenScheduleMap.entries()) {
+		const normTokens = cleanDosenName(dosenName)
+			.split(" ")
+			.filter((t) => t.length >= 3);
+
+		let score = 0;
+		for (const qTok of queryTerms) {
+			for (const nTok of normTokens) {
+				if (nTok === qTok) score += 10;
+				else if (nTok.startsWith(qTok) || (qTok.length >= 4 && qTok.startsWith(nTok))) score += 6;
+				else if (nTok.includes(qTok) || (qTok.length >= 4 && qTok.includes(nTok))) score += 3;
+			}
+		}
+
+		if (score <= 0) continue;
+
+		matches.push({
+			dosen: dosenName,
+			kontak: findDosenContact(dosenName),
+			score,
+			schedules: [...items].sort(
+				(a, b) =>
+					(a.hariIndex || 0) - (b.hariIndex || 0) ||
+					(a.jamMulai || "").localeCompare(b.jamMulai || "")
+			),
+		});
+	}
+
+	matches.sort((a, b) => b.score - a.score || b.schedules.length - a.schedules.length);
+	return matches;
+}
+
+/**
+ * Format jawaban teks "dosen mengajar di kelas mana".
+ * @param {string} query - nama/kata kunci dosen
+ * @param {string} [prefix]
+ * @returns {string}
+ */
+function formatDosenInfo(query, prefix = ".") {
+	const institusi = jadwalData.meta?.institusi || "Institut Widya Pratama Pekalongan (IWIMA)";
+	const keyword = String(query || "").trim();
+	const matches = searchDosenSchedules(keyword);
+
+	if (matches.length === 0) {
+		return `⚠️ Dosen dengan kata kunci *"${keyword}"* tidak ditemukan di data jadwal.\n\n` +
+			`💡 _Coba pakai nama panggilan, contoh: *${prefix}dosen moses*, *${prefix}dosen widiyono*, *${prefix}dosen eko*._`;
+	}
+
+	const primary = matches[0];
+	const classes = [...new Set(primary.schedules.map((s) => s.kelas))];
+
+	let text = `👨‍🏫 *JADWAL MENGAJAR DOSEN (SEMUA KELAS)*\n`;
+	text += `🏛️ _${institusi}_\n`;
+	text += `━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+	text += `• 👤 *Nama:* ${primary.dosen}\n`;
+	if (primary.kontak) {
+		const wa = primary.kontak.replace(/[^0-9]/g, "");
+		text += `• 📞 *Nomor WA:* ${primary.kontak}\n`;
+		text += `• 💬 *Chat:* https://wa.me/${wa}\n`;
+	}
+	text += `• 🏷️ *Mengajar:* ${classes.length} kelas (${classes.join(", ")})\n`;
+	text += `• 📊 *Total:* ${primary.schedules.length} sesi\n\n`;
+
+	text += `📚 *Rincian Jadwal:*\n`;
+	primary.schedules.forEach((s, idx) => {
+		const icon = s.jenis === "Praktikum" ? "💻" : "📘";
+		text += `${idx + 1}. ${icon} *${s.matkul}*\n`;
+		text += `   • 🏷️ *Kelas:* ${s.kelas}\n`;
+		text += `   • 🗓️ *Waktu:* ${s.hari}, ${s.jam || "-"} WIB\n`;
+		text += `   • 🏛️ *Ruang:* ${s.ruang || "-"} (${s.jenis || "Teori"})\n\n`;
+	});
+
+	if (matches.length > 1) {
+		text += `━━━━━━━━━━━━━━━━━━━━━━━\n`;
+		text += `🔍 *Dosen lain yang mungkin cocok:*\n`;
+		text += matches
+			.slice(1, 4)
+			.map((m) => `• ${m.dosen} (${m.schedules.length} sesi)`)
+			.join("\n");
+		text += `\n\n`;
+	}
+
+	text += `━━━━━━━━━━━━━━━━━━━━━━━\n`;
+	text += `💡 _Atau tanya bebas ke bot: "pak ${keyword} lagi ngajar di kelas mana?"_`;
+
+	return text.trim();
+}
+
 module.exports = {
 	getJadwalKuliah,
 	getWibDate,
+	searchDosenSchedules,
+	formatDosenInfo,
 };

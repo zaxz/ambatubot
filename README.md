@@ -103,6 +103,7 @@ npm start
 | `.iqc <teks>` | Membuat gambar iPhone Quoted Chat (IQC) aesthetic | Kirim `.iqc halo...` / `.iqc aku \| teks` atau reply chat dengan `.iqc` |
 | `.jadwal <kelas> [hari]` | Cek jadwal kuliah IWIMA (hari ini, besok, lusa, semua) | Kirim `.jadwal 3p51 hari ini` atau `.jadwal 3p51 besok` |
 | `.pj <kelas> <matkul>` | Cek Penanggung Jawab (PJ) matkul & kontak WA dosen | Kirim `.pj 3p51 statistik` atau `.pj 3p51 semua` |
+| `.dosen <nama>` | Cari dosen & seluruh jadwal mengajarnya di **semua kelas** | Kirim `.dosen moses` atau `.dosen widiyono` |
 | `.ping` | Mengecek kecepatan respon bot (latensi server) | Kirim `.ping` |
 | `.runtime` | Menampilkan durasi aktif bot dan penggunaan RAM | Kirim `.runtime` |
 | `.listgrup` | Menampilkan daftar grup yang diikuti bot (Khusus Owner) | Kirim `.listgrup` |

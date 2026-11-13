@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { getWibDate } = require('./jadwalHelper');
+const { getWibDate, searchDosenSchedules } = require('./jadwalHelper');
 const jadwalData = require('../assets/jadwal_lengkap.json');
 const kabinetData = require('../assets/kabinet_3p51.json');
 
@@ -31,8 +31,37 @@ function buildAcademicContext(queryText) {
 	if (!queryText) return '';
 
 	const academicTrigger =
-		/\b(jadwal|kuliah|matkul|mata kuliah|kelas|praktikum|teori|ruang|lab|dosen|pj|penanggung jawab|kabinet|pengurus|presiden|wakil|sekretaris|bendahara|3p51|statistik|jarkom|dbms|erp|dsi|sia|pbw|web|pkb|inggris)\b|\b[1-8][a-z]\d{2}\b/i;
+		/\b(jadwal|kuliah|matkul|mata kuliah|kelas|praktikum|teori|ruang|lab|dosen|pengajar|guru|ngajar|mengajar|ajar|pj|penanggung jawab|kabinet|pengurus|presiden|wakil|sekretaris|bendahara|3p51|statistik|jarkom|dbms|erp|dsi|sia|pbw|web|pkb|inggris)\b|\b[1-8][a-z]\d{2}\b/i;
 	if (!academicTrigger.test(queryText)) return '';
+
+	const sections = [];
+
+	// 1. Pertanyaan seputar dosen: cari di SEMUA kelas (bukan hanya 3P51)
+	const dosenMatches = searchDosenSchedules(queryText);
+	if (dosenMatches.length > 0) {
+		const institusi = jadwalData.meta?.institusi || 'IWIMA';
+		const topMatches = dosenMatches.slice(0, 3);
+
+		for (const match of topMatches) {
+			const classes = [...new Set(match.schedules.map((s) => s.kelas))];
+			const schedLines = match.schedules.map(
+				(s) =>
+					`- Kelas ${s.kelas} | ${s.hari} (hariIndex ${s.hariIndex}) | ${s.jam || '-'} WIB | ${s.matkul} (${s.jenis || 'Teori'}, Ruang: ${s.ruang || '-'})`
+			);
+			const contact = match.kontak ? ` | Nomor WA: ${match.kontak}` : '';
+
+			sections.push(
+				`[DATA DOSEN & SELURUH JADWAL MENGAJARNYA DI SEMUA KELAS (${institusi})]\n` +
+					`Dosen: ${match.dosen}${contact}\n` +
+					`Mengajar di ${classes.length} kelas: ${classes.join(', ')}\n` +
+					`Total ${match.schedules.length} sesi:\n${schedLines.join('\n')}`
+			);
+		}
+
+		sections.push(
+			`[PETUNJUK DOSEN] Jika ditanya "sedang/lagi ngajar di kelas mana", bandingkan hari & jam pada data di atas dengan WIB sekarang (${getWibDate().full}, lihat jam server di atas). Jika tidak ada sesi yang cocok, sebutkan jadwal terdekat berikutnya. DILARANG menyebut dosen/kelas lain di luar data ini.`
+		);
+	}
 
 	const allClasses = jadwalData.meta?.daftarKelas || [];
 	const mentionedCodes = queryText.toUpperCase().match(/\b[1-8][A-Z]\d{2}\b/g) || [];
@@ -45,11 +74,11 @@ function buildAcademicContext(queryText) {
 		if (targetClasses.length >= 2) break;
 	}
 
-	if (targetClasses.length === 0) {
+	// Default ke 3P51 hanya bila pertanyaan tidak menyebut kelas maupun dosen
+	if (targetClasses.length === 0 && dosenMatches.length === 0) {
 		targetClasses.push('3P51');
 	}
 
-	const sections = [];
 	for (const cls of targetClasses) {
 		const items = (jadwalData.jadwal || [])
 			.filter((item) => (item.kelas || '').toUpperCase().includes(cls))
@@ -63,7 +92,8 @@ function buildAcademicContext(queryText) {
 		}
 	}
 
-	if (targetClasses.includes('3P51') || /\b(pj|penanggung jawab|kabinet|pengurus|presiden|wakil|sekretaris|bendahara|dosen)\b/i.test(queryText)) {
+	const wantsKabinet = /\b(pj|penanggung jawab|kabinet|pengurus|presiden|wakil|sekretaris|bendahara)\b/i.test(queryText);
+	if (targetClasses.includes('3P51') || wantsKabinet) {
 		const pengurus = (kabinetData.pengurusInti || [])
 			.map((p) => `${p.jabatan}: ${p.nama}`)
 			.join(', ');
@@ -197,6 +227,7 @@ async function generateReply({ message, senderName, groupName, history = [], quo
 		`  • iPhone Quoted Chat (IQC): Ketik "${prefix}iqc <teks>", "${prefix}iqc aku | <teks>" (bubble hijau kanan), atau balas chat dengan "${prefix}iqc".`,
 		`  • Cek Jadwal Kuliah: Ketik "${prefix}jadwal <kelas> [hari ini/besok/semua]" (contoh: "${prefix}jadwal 3p51 besok").`,
 		`  • Cek PJ Matkul & Dosen: Ketik "${prefix}pj <kelas> <matkul>" (contoh: "${prefix}pj 3p51 statistik").`,
+		`  • Cari Dosen Lintas Kelas: Ketik "${prefix}dosen <nama>" (contoh: "${prefix}dosen moses"). Bisa juga ditanya bebas seperti "pak moses lagi ngajar di kelas mana?".`,
 		`  • Menu & Bantuan: Ketik "${prefix}menu".`,
 		`  • Cek Kecepatan/Server: Ketik "${prefix}ping" atau "${prefix}runtime".`,
 	];
