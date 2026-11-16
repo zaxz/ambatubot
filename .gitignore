@@ -25,3 +25,8 @@ Thumbs.db
 
 # Archives
 *.zip
+# Database SQLite (jangan di-commit; di-upload manual ke server)
+*.db
+*.db-wal
+*.db-shm
+
