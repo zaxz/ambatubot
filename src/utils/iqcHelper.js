@@ -339,21 +339,6 @@ function buildBubblePath(x, y, w, h, isRight) {
 	].join(" ");
 }
 
-/** Path untuk gambar di bagian atas bubble (hanya sudut atas kiri & kanan yang melengkung). */
-function buildImageTopPath(x, y, w, h) {
-	const r = 16;
-	return [
-		`M ${x + r} ${y}`,
-		`L ${x + w - r} ${y}`,
-		`Q ${x + w} ${y} ${x + w} ${y + r}`,
-		`L ${x + w} ${y + h}`,
-		`L ${x} ${y + h}`,
-		`L ${x} ${y + r}`,
-		`Q ${x} ${y} ${x + r} ${y}`,
-		"Z",
-	].join(" ");
-}
-
 /**
  * Menghasilkan gambar iPhone Quoted Chat (gaya 3scode/iqc-generator + header blur & status bar iOS)
  * sebagai Buffer PNG 880x1912.
@@ -418,7 +403,10 @@ async function createIqcImage(options) {
 	const bubblePadY = 10;
 	const maxContentW = maxBubbleW - bubblePadX * 2;
 
-	// Siapkan ukuran gambar yang menempel penuh pada bubble (tanpa border samping/atas)
+	// Border pembatas di sekeliling gambar (persis seperti contoh WhatsApp iOS)
+	const imgBorder = 3;
+	const imgRadius = 13;
+
 	let imageW = 0;
 	let imageH = 0;
 	const imageMaxH = 260;
@@ -426,7 +414,7 @@ async function createIqcImage(options) {
 		try {
 			const meta = await sharp(imageBuffer).metadata();
 			const aspect = (meta.height && meta.width) ? meta.height / meta.width : 1;
-			imageW = maxBubbleW;
+			imageW = maxBubbleW - imgBorder * 2;
 			imageH = Math.min(Math.round(imageW * aspect), imageMaxH);
 		} catch (e) {
 			hasImage = false;
@@ -462,21 +450,21 @@ async function createIqcImage(options) {
 	let bubbleW = 0;
 	let bubbleH = 0;
 	let inlineTimeFits = false;
-	const captionPadTop = 6;
+	const captionGap = 5;
 	const captionPadBottom = 8;
 
 	if (hasImage && !hasText) {
-		// Gambar saja tanpa caption: gambar menempel penuh tanpa border di dalam bubble
-		bubbleW = imageW;
-		bubbleH = imageH;
+		// Gambar saja tanpa caption: bubble membungkus gambar dengan border tipis (imgBorder)
+		bubbleW = imageW + imgBorder * 2;
+		bubbleH = imageH + imgBorder * 2;
 	} else if (hasImage && hasText) {
-		// Gambar dengan caption: gambar berada di atas penuh tanpa border, caption di bawahnya
-		bubbleW = imageW;
+		// Gambar dengan caption: gambar ber-border di atas, caption di bawahnya
+		bubbleW = imageW + imgBorder * 2;
 		const lastLine = wrapped[wrapped.length - 1];
 		inlineTimeFits = wrapped.length > 0 && (lastLine.widthPx + timeGap + timeW <= maxContentW);
 		const extraTimeRowH = inlineTimeFits ? 0 : 16;
-		const captionH = captionPadTop + wrapped.length * lineH + extraTimeRowH + captionPadBottom;
-		bubbleH = imageH + captionH;
+		const captionH = captionGap + wrapped.length * lineH + extraTimeRowH + captionPadBottom;
+		bubbleH = imgBorder + imageH + captionH;
 	} else {
 		// Teks saja: perbaikan bug jam bertumpuk dengan caption!
 		// Lebar baris terakhir jika jam muat inline harus memperhitungkan (lastLine.widthPx + timeGap + timeW)
@@ -606,56 +594,27 @@ async function createIqcImage(options) {
 
 	const composites = [{ input: Buffer.from(fgSvg), top: 0, left: 0 }];
 
-	// 4. Proses masking gambar (gambar menempel penuh ke bubble tanpa border)
-	if (hasImage && !hasText) {
-		// Gambar saja tanpa caption: bentuk seluruh bubble mengikuti bubblePath (dengan sudut melengkung & ekor)
-		const pad = 8;
-		const maskW = bubbleW + pad * 2;
-		const maskH = bubbleH + pad * 2;
-		const maskPath = buildBubblePath(pad, pad, bubbleW, bubbleH, isRight);
-		const maskSvg = Buffer.from(
-			`<svg xmlns="http://www.w3.org/2000/svg" width="${maskW * SCALE}" height="${maskH * SCALE}" viewBox="0 0 ${maskW} ${maskH}">
-				<path d="${maskPath}" fill="#ffffff"/>
+	// 4. Proses masking gambar (gambar dengan border di sekelilingnya seperti contoh iOS WhatsApp)
+	if (hasImage) {
+		const imgX = bubbleX + imgBorder;
+		const imgY = bubbleY + imgBorder;
+
+		const imgMaskSvg = Buffer.from(
+			`<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(imageW * SCALE)}" height="${Math.round(imageH * SCALE)}" viewBox="0 0 ${imageW} ${imageH}">
+				<rect x="0" y="0" width="${imageW}" height="${imageH}" rx="${imgRadius}" fill="#ffffff"/>
 			</svg>`
 		);
 
 		const maskedImg = await sharp(imageBuffer)
-			.resize(bubbleW * SCALE, bubbleH * SCALE, { fit: "cover", position: "center" })
-			.extend({
-				top: pad * SCALE,
-				bottom: pad * SCALE,
-				left: pad * SCALE,
-				right: pad * SCALE,
-				background: { r: 0, g: 0, b: 0, alpha: 0 },
-			})
-			.composite([{ input: maskSvg, blend: "dest-in" }])
+			.resize(Math.round(imageW * SCALE), Math.round(imageH * SCALE), { fit: "cover", position: "center" })
+			.composite([{ input: imgMaskSvg, blend: "dest-in" }])
 			.png()
 			.toBuffer();
 
 		composites.push({
 			input: maskedImg,
-			left: Math.round((bubbleX - pad) * SCALE),
-			top: Math.round((bubbleY - pad) * SCALE),
-		});
-	} else if (hasImage && hasText) {
-		// Gambar dengan caption: bagian atas melengkung, bagian bawah datar menyatu dengan caption (tanpa border)
-		const topMaskPath = buildImageTopPath(0, 0, bubbleW, imageH);
-		const maskSvg = Buffer.from(
-			`<svg xmlns="http://www.w3.org/2000/svg" width="${bubbleW * SCALE}" height="${imageH * SCALE}" viewBox="0 0 ${bubbleW} ${imageH}">
-				<path d="${topMaskPath}" fill="#ffffff"/>
-			</svg>`
-		);
-
-		const maskedImg = await sharp(imageBuffer)
-			.resize(bubbleW * SCALE, imageH * SCALE, { fit: "cover", position: "center" })
-			.composite([{ input: maskSvg, blend: "dest-in" }])
-			.png()
-			.toBuffer();
-
-		composites.push({
-			input: maskedImg,
-			left: Math.round(bubbleX * SCALE),
-			top: Math.round(bubbleY * SCALE),
+			left: Math.round(imgX * SCALE),
+			top: Math.round(imgY * SCALE),
 		});
 	}
 
@@ -710,7 +669,9 @@ async function createIqcImage(options) {
 		// Isi teks caption / bubble (jika ada teks)
 		if (hasText) {
 			const emojiDrawSize = Math.round(quoteFontSize * 1.12);
-			const captionStartY = bubbleY + (hasImage ? imageH + captionPadTop : bubblePadY);
+			const captionStartY = hasImage
+				? bubbleY + imgBorder + imageH + captionGap
+				: bubbleY + bubblePadY;
 
 			for (let i = 0; i < wrapped.length; i++) {
 				const line = wrapped[i];
@@ -782,14 +743,14 @@ async function createIqcImage(options) {
 				baselineY: bubbleY + bubbleH - 7,
 			});
 		} else if (hasImage) {
-			// Jam di dalam gambar tanpa caption (di pojok kanan bawah, tanpa background transparan)
+			// Jam di dalam gambar tanpa caption (di pojok kanan bawah gambar, tanpa background transparan)
 			await addDrawText({
 				text: bubbleTime,
 				fontPath: sfTextRegPath,
 				size: timeFontSize,
 				color: "#FFFFFF",
-				xExpr: String(Math.round((bubbleX + bubbleW - bubblePadX - timeW) * SCALE)),
-				baselineY: bubbleY + bubbleH - 7,
+				xExpr: String(Math.round((bubbleX + bubbleW - imgBorder - 10 - timeW) * SCALE)),
+				baselineY: bubbleY + bubbleH - imgBorder - 6,
 			});
 		}
 
