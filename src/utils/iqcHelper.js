@@ -305,7 +305,7 @@ function buildBlurredBackdropSvg({ hasAvatar }) {
 }
 
 /** Path bubble WhatsApp iOS dengan sudut melengkung halus konsentris dan ekor di sudut bawah. */
-function buildBubblePath(x, y, w, h, isRight, r = 18) {
+function buildBubblePath(x, y, w, h, isRight, r = 10) {
 	if (isRight) {
 		return [
 			`M ${x + r} ${y}`,
@@ -402,10 +402,10 @@ async function createIqcImage(options) {
 	const bubblePadY = 10;
 	const maxContentW = maxBubbleW - bubblePadX * 2;
 
-	const bubbleRadius = 18;
-	// Border pembatas di sekeliling gambar dipertebal (persis seperti contoh WhatsApp iOS)
-	const imgBorder = 4.5;
-	const imgRadius = bubbleRadius - imgBorder; // 13.5 (konsentris sempurna dengan lengkungan bubble)
+	const bubbleRadius = 10;
+	// Border pembatas di sekeliling gambar konsentris dengan radius bubble
+	const imgBorder = 3.5;
+	const imgRadius = bubbleRadius - imgBorder; // 6.5 (konsentris dengan lengkungan bubble)
 
 	let imageW = 0;
 	let imageH = 0;
@@ -600,7 +600,7 @@ async function createIqcImage(options) {
 		const imgY = bubbleY + imgBorder;
 
 		const rTop = imgRadius;
-		const rBot = hasText ? 4 : imgRadius;
+		const rBot = hasText ? 3 : imgRadius;
 		const imgMaskSvg = Buffer.from(
 			`<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(imageW * SCALE)}" height="${Math.round(imageH * SCALE)}" viewBox="0 0 ${imageW} ${imageH}">
 				<path d="
