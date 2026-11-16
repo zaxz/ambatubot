@@ -503,6 +503,12 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 						iqcImageBuffer = pngBuf;
 						iqcImageMime = "image/png";
 					}
+				} else if (quotedType === "documentMessage" && quotedMsg?.documentMessage?.mimetype?.startsWith("image/")) {
+					const buf = await downloadMediaBuffer(quotedMsg.documentMessage, "document");
+					if (buf.length > 0) {
+						iqcImageBuffer = buf;
+						iqcImageMime = quotedMsg.documentMessage.mimetype;
+					}
 				}
 			} catch (e) {
 				console.warn("[IQC] Gagal memuat gambar:", e.message);
@@ -512,7 +518,7 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					`⚠️ *Teks Tidak Ditemukan!*\n\nContoh penggunaan:\n` +
 					`• *${prefix}iqc Terkadang aku merasa pantas diabaikan...*\n` +
 					`• *${prefix}iqc aku | biar semesta aja yg atur 🙏*\n\n` +
-					`Atau balas (reply) pesan seseorang lalu ketik *${prefix}iqc*`
+					`Atau balas (reply) pesan / gambar seseorang lalu ketik *${prefix}iqc*`
 				);
 			}
 
@@ -529,7 +535,7 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					const customText = rawInput.slice(pipeIdx + 1).trim();
 					quoteText = customText || quotedText;
 
-					if (!quoteText) {
+					if (!quoteText && !iqcImageBuffer) {
 						await react("❌");
 						return await reply(`⚠️ Teks setelah tanda \`|\` masih kosong.`);
 					}
@@ -537,8 +543,9 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					const selfAliases = ["aku", "me", "gw", "gue", "saya", "kanan", "you"];
 					side = selfAliases.includes(customSide) ? "you" : "other";
 					avatarTarget = side === "you" ? sender : (contextInfo?.participant || avatarTarget);
-				} else if (!rawInput && quotedText) {
-					quoteText = quotedText;
+				} else if (quotedMsg) {
+					// Balasan ke pesan seseorang / bot (bisa teks, gambar tanpa caption, atau gambar dengan caption)
+					quoteText = rawInput || quotedText;
 					const quotedParticipant = contextInfo?.participant || null;
 					const cleanParticipant = quotedParticipant ? quotedParticipant.replace(/[^0-9]/g, "") : "";
 					const cleanBotJid = context.botJid ? context.botJid.replace(/[^0-9]/g, "") : "";
@@ -550,6 +557,10 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 
 					side = isQuotedBot ? "you" : "other";
 					avatarTarget = isGroup ? from : (quotedParticipant || sender);
+				} else {
+					quoteText = rawInput;
+					side = "other";
+					avatarTarget = isGroup ? from : sender;
 				}
 
 				let avatarBuffer = null;

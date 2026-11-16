@@ -31,7 +31,8 @@ const SF_FONT_SPECS = {
 const resolvedFonts = new Map();
 let fontNetworkBlocked = false;
 
-const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+// 7 Emojis + 1 tombol plus di Reaction Pill (persis screenshot iOS WhatsApp)
+const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🤩"];
 const EMOJI_PATTERN = /\p{Extended_Pictographic}|\p{Regional_Indicator}|[\u2600-\u27BF]|\u20E3/u;
 const graphemeSegmenter =
 	typeof Intl !== "undefined" && Intl.Segmenter ? new Intl.Segmenter("en", { granularity: "grapheme" }) : null;
@@ -70,14 +71,8 @@ const BG_MESSAGES = [
 	{ text: "Iya iya", sender: "received" },
 ];
 
-// 7 item menu konteks gaya iOS WhatsApp (outline icons)
-const CONTEXT_MENU_ITEMS = [
-	{
-		label: "Beri Bintang",
-		destructive: false,
-		iconSvg:
-			'<path d="M12 3.2L14.65 8.55L20.55 9.4L16.25 13.55L17.25 19.45L12 16.65L6.75 19.45L7.75 13.55L3.45 9.4L9.35 8.55Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>',
-	},
+// Menu konteks untuk pesan gambar gaya WhatsApp iOS
+const IMAGE_CONTEXT_MENU_ITEMS = [
 	{
 		label: "Balas",
 		destructive: false,
@@ -97,22 +92,74 @@ const CONTEXT_MENU_ITEMS = [
 			'<path d="M9 9.5C9 8.67 9.67 8 10.5 8H15L19 12V19C19 19.83 18.33 20.5 17.5 20.5H10.5C9.67 20.5 9 19.83 9 19Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><path d="M15 8V12H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><path d="M9 16H6.5C5.67 16 5 15.33 5 14.5V5C5 4.17 5.67 3.5 6.5 3.5H11L15 7.5V8" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none"/>',
 	},
 	{
-		label: "Sematkan",
+		label: "Simpan",
 		destructive: false,
 		iconSvg:
-			'<path d="M8.5 3.5H15.5C16.1 3.5 16.5 3.9 16.5 4.5C16.5 5.1 16.1 5.5 15.5 5.5H14.5V10L17.5 13C17.8 13.3 17.6 13.8 17.1 13.8H6.9C6.4 13.8 6.2 13.3 6.5 13L9.5 10V5.5H8.5C7.9 5.5 7.5 5.1 7.5 4.5C7.5 3.9 7.9 3.5 8.5 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><line x1="12" y1="13.8" x2="12" y2="21" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+			'<path d="M5 14.5V18.5C5 19.3 5.7 20 6.5 20H17.5C18.3 20 19 19.3 19 18.5V14.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M12 4V15M7.5 10.5L12 15L16.5 10.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
 	},
 	{
-		label: "Laporkan",
+		label: "Tanya Meta AI",
 		destructive: false,
 		iconSvg:
-			'<path d="M10.7 4.2L3.2 17.5C2.6 18.6 3.4 20 4.7 20H19.3C20.6 20 21.4 18.6 20.8 17.5L13.3 4.2C12.7 3.1 11.3 3.1 10.7 4.2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><line x1="12" y1="9.2" x2="12" y2="13.8" stroke="currentColor" stroke-width="1.65" stroke-linecap="round"/><circle cx="12" cy="16.8" r="1" fill="currentColor"/>',
+			'<path d="M12 3C7.03 3 3 7.03 3 12C3 16.97 7.03 21 12 21C16.97 21 21 16.97 21 12C21 7.03 16.97 3 12 3Z" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 3" stroke-linecap="round" fill="none"/><circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="1.4" fill="none"/>',
 	},
 	{
 		label: "Hapus",
 		destructive: true,
 		iconSvg:
 			'<path d="M4.5 6.5H19.5M9.5 6.5V4.5C9.5 3.95 9.95 3.5 10.5 3.5H13.5C14.05 3.5 14.5 3.95 14.5 4.5V6.5M6.5 6.5L7.3 18.8C7.4 19.75 8.15 20.5 9.1 20.5H14.9C15.85 20.5 16.6 19.75 16.7 18.8L17.5 6.5M9.6 10V17M12 10V17M14.4 10V17" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+	},
+	{
+		label: "Lainnya...",
+		destructive: false,
+		iconSvg:
+			'<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="8" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="16" cy="12" r="1.2" fill="currentColor"/>',
+	},
+];
+
+// Menu konteks untuk pesan teks biasa gaya WhatsApp iOS
+const TEXT_CONTEXT_MENU_ITEMS = [
+	{
+		label: "Balas",
+		destructive: false,
+		iconSvg:
+			'<path d="M10 4.5L3.5 10.5L10 16.5V13C14.8 13 18.2 14.5 20.5 18.5C19.6 12.6 16.2 8.2 10 8V4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none"/>',
+	},
+	{
+		label: "Teruskan",
+		destructive: false,
+		iconSvg:
+			'<path d="M14 4.5L20.5 10.5L14 16.5V13C9.2 13 5.8 14.5 3.5 18.5C4.4 12.6 7.8 8.2 14 8V4.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none"/>',
+	},
+	{
+		label: "Salin",
+		destructive: false,
+		iconSvg:
+			'<path d="M9 9.5C9 8.67 9.67 8 10.5 8H15L19 12V19C19 19.83 18.33 20.5 17.5 20.5H10.5C9.67 20.5 9 19.83 9 19Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><path d="M15 8V12H19" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><path d="M9 16H6.5C5.67 16 5 15.33 5 14.5V5C5 4.17 5.67 3.5 6.5 3.5H11L15 7.5V8" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" fill="none"/>',
+	},
+	{
+		label: "Beri Bintang",
+		destructive: false,
+		iconSvg:
+			'<path d="M12 3.2L14.65 8.55L20.55 9.4L16.25 13.55L17.25 19.45L12 16.65L6.75 19.45L7.75 13.55L3.45 9.4L9.35 8.55Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/>',
+	},
+	{
+		label: "Sematkan",
+		destructive: false,
+		iconSvg:
+			'<path d="M8.5 3.5H15.5C16.1 3.5 16.5 3.9 16.5 4.5C16.5 5.1 16.1 5.5 15.5 5.5H14.5V10L17.5 13C17.8 13.3 17.6 13.8 17.1 13.8H6.9C6.4 13.8 6.2 13.3 6.5 13L9.5 10V5.5H8.5C7.9 5.5 7.5 5.1 7.5 4.5C7.5 3.9 7.9 3.5 8.5 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/><line x1="12" y1="13.8" x2="12" y2="21" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+	},
+	{
+		label: "Hapus",
+		destructive: true,
+		iconSvg:
+			'<path d="M4.5 6.5H19.5M9.5 6.5V4.5C9.5 3.95 9.95 3.5 10.5 3.5H13.5C14.05 3.5 14.5 3.95 14.5 4.5V6.5M6.5 6.5L7.3 18.8C7.4 19.75 8.15 20.5 9.1 20.5H14.9C15.85 20.5 16.6 19.75 16.7 18.8L17.5 6.5M9.6 10V17M12 10V17M14.4 10V17" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+	},
+	{
+		label: "Lainnya...",
+		destructive: false,
+		iconSvg:
+			'<circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.6" fill="none"/><circle cx="8" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="16" cy="12" r="1.2" fill="currentColor"/>',
 	},
 ];
 
@@ -196,7 +243,7 @@ function wrapQuoteText(rawText, font, emojiMap, fontSize, maxContentW, fallbackF
 	};
 	const measureLinePx = (tokens) => tokens.reduce((acc, t) => acc + tokenWidthPx(t), 0);
 
-	const paragraphs = String(rawText).replace(/\uFE0E/g, "").split("\n");
+	const paragraphs = String(rawText || "").replace(/\uFE0E/g, "").split("\n");
 	const wrappedLines = [];
 
 	for (const para of paragraphs) {
@@ -284,7 +331,6 @@ function buildBlurredBackdropSvg({ hasAvatar }) {
 		const bx = isSent ? CARD_W - 14 - bw : 14;
 		const fill = isSent ? "#0B6156" : "#252929";
 		bubbles.push(`<rect x="${bx}" y="${y}" width="${bw}" height="${bh}" rx="18" fill="${fill}"/>`);
-		// Garis teks samar di dalam gelembung agar efek blur terasa realistis
 		bubbles.push(`<rect x="${bx + 14}" y="${y + 16}" width="${Math.max(40, bw - 40)}" height="11" rx="5" fill="rgba(255,255,255,0.22)"/>`);
 		y += bh + 6;
 		if (y > 895) break;
@@ -292,7 +338,6 @@ function buildBlurredBackdropSvg({ hasAvatar }) {
 
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${OUT_W}" height="${OUT_H}" viewBox="0 0 ${CARD_W} ${CARD_H}">
   <rect width="${CARD_W}" height="${CARD_H}" fill="#121617"/>
-  <!-- Samar header WhatsApp di belakang blur -->
   <rect x="0" y="54" width="${CARD_W}" height="56" fill="#181C1D"/>
   <path d="M26 74L18 82L26 90" stroke="rgba(255,255,255,0.75)" stroke-width="2.5" stroke-linecap="round" fill="none"/>
   ${hasAvatar ? "" : '<circle cx="58" cy="82" r="18" fill="#3B6EA5"/>'}
@@ -300,9 +345,7 @@ function buildBlurredBackdropSvg({ hasAvatar }) {
   <rect x="86" y="89" width="54" height="8" rx="4" fill="rgba(255,255,255,0.25)"/>
   <rect x="366" y="75" width="22" height="14" rx="3" fill="rgba(255,255,255,0.55)"/>
   <circle cx="412" cy="82" r="8" fill="rgba(255,255,255,0.55)"/>
-  <!-- Gelembung chat latar belakang -->
   ${bubbles.join("\n  ")}
-  <!-- Samar input bar bawah -->
   <rect x="0" y="906" width="${CARD_W}" height="50" fill="#181C1D"/>
   <rect x="48" y="914" width="336" height="32" rx="16" fill="rgba(255,255,255,0.12)"/>
 </svg>`;
@@ -343,20 +386,37 @@ function buildBubblePath(x, y, w, h, isRight) {
 	].join(" ");
 }
 
+/** Path untuk gambar di bagian atas bubble (hanya sudut atas kiri & kanan yang melengkung). */
+function buildImageTopPath(x, y, w, h) {
+	const r = 16;
+	return [
+		`M ${x + r} ${y}`,
+		`L ${x + w - r} ${y}`,
+		`Q ${x + w} ${y} ${x + w} ${y + r}`,
+		`L ${x + w} ${y + h}`,
+		`L ${x} ${y + h}`,
+		`L ${x} ${y + r}`,
+		`Q ${x} ${y} ${x + r} ${y}`,
+		"Z",
+	].join(" ");
+}
+
 /**
- * Menghasilkan gambar iPhone Quoted Chat (gaya 3scode/iqc-generator + header blur & status bar iOS)
+ * Menghasilkan gambar iPhone Quoted Chat (gaya WhatsApp iOS + header blur & status bar iOS)
  * sebagai Buffer PNG 880x1912.
  * @param {Object} options
- * @param {string} options.text - Isi pesan yang di-quote
+ * @param {string} [options.text] - Isi pesan atau caption
  * @param {'you'|'other'} [options.side='other'] - Posisi bubble (kiri gelap atau kanan hijau)
  * @param {Buffer|null} [options.avatarBuffer] - Foto profil/grup untuk siluet blur di header atas
+ * @param {Buffer|null} [options.imageBuffer] - Buffer gambar lampiran pesan
+ * @param {string|null} [options.imageMime] - Mime gambar lampiran pesan
  * @param {string} [options.time] - Jam pada status bar & bubble (default jam WIB sekarang)
- * @param {number} [options.battery=76] - Persentase baterai di dalam ikon baterai iOS
+ * @param {number} [options.battery=100] - Persentase baterai di status bar
  * @returns {Promise<Buffer>}
  */
 async function createIqcImage(options) {
 	const {
-		text,
+		text = "",
 		side = "other",
 		avatarBuffer = null,
 		imageBuffer = null,
@@ -365,9 +425,12 @@ async function createIqcImage(options) {
 		battery = 100,
 	} = options;
 
-	const hasImage = Boolean(imageBuffer);
-	if (!hasImage && (!text || !String(text).trim())) {
-		throw new Error("Teks pesan IQC tidak boleh kosong.");
+	const cleanText = (text || "").trim();
+	let hasImage = Boolean(imageBuffer && imageBuffer.length > 0);
+	const hasText = Boolean(cleanText.length > 0);
+
+	if (!hasImage && !hasText) {
+		throw new Error("Pesan IQC tidak boleh kosong (butuh teks atau gambar).");
 	}
 
 	const [sfTextRegPath, sfTextSemiPath, ...reactionPaths] = await Promise.all([
@@ -379,7 +442,7 @@ async function createIqcImage(options) {
 	const textFont = loadFont(sfTextRegPath);
 
 	// Ambil aset Apple emoji yang mungkin ada di dalam isi teks quote
-	const rawTokens = tokenize(String(text).replace(/\uFE0E/g, ""));
+	const rawTokens = tokenize(String(cleanText).replace(/\uFE0E/g, ""));
 	const quoteEmojiTokens = [...new Set(
 		rawTokens.filter((tok) => EMOJI_PATTERN.test(tok) && ![...tok].every((c) => textFont.hasGlyph(c)))
 	)];
@@ -397,47 +460,53 @@ async function createIqcImage(options) {
 	const cjkFontPath = needsCjk ? await ensureCjkFont().catch(() => null) : null;
 	const cjkFont = cjkFontPath ? loadFont(cjkFontPath) : null;
 
-	// 1. Hitung tata letak bubble & timestamp inline di pojok kanan bawah
-	const maxBubbleW = Math.round(CARD_W * 0.78); // ~343px
+	const maxBubbleW = Math.round(CARD_W * 0.77); // ~338px
+	const minBubbleW = Math.round(CARD_W * 0.55); // ~242px
 	const bubblePadX = 14;
 	const bubblePadY = 10;
-	const maxContentW = maxBubbleW - bubblePadX * 2;
-	// Siapkan buffer gambar yang akan dirender di dalam bubble (kalau ada)
-	let imgBuf = null;
+
+	// Siapkan ukuran gambar (jika ada)
 	let imageW = 0;
 	let imageH = 0;
-	const imageMaxH = 260;
-	if (hasImage && imageBuffer) {
+	if (hasImage) {
 		try {
 			const meta = await sharp(imageBuffer).metadata();
-			const aspect = (meta.height && meta.width) ? meta.height / meta.width : 1;
-			imageW = maxContentW;
-			imageH = Math.min(Math.round(imageW * aspect), imageMaxH);
-			imgBuf = await sharp(imageBuffer)
-				.resize(imageW, imageH, { fit: "cover", position: "center" })
-				.png()
-				.toBuffer();
+			const origW = meta.width || 400;
+			const origH = meta.height || 300;
+			const aspect = origH / origW;
+
+			if (aspect >= 1.25) {
+				// Format tegak / portrait
+				imageW = Math.round(Math.min(maxBubbleW, Math.max(minBubbleW, 280 / aspect)));
+				imageH = Math.min(310, Math.max(160, Math.round(imageW * aspect)));
+			} else {
+				// Format landscape / persegi
+				imageW = maxBubbleW;
+				imageH = Math.min(270, Math.max(140, Math.round(imageW * aspect)));
+			}
 		} catch (e) {
-			imgBuf = null;
-			imageW = 0;
-			imageH = 0;
+			hasImage = false;
 		}
 	}
 
+	const maxContentW = (hasImage ? imageW : maxBubbleW) - bubblePadX * 2;
 	let quoteFontSize = 15.5;
-	let wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
-	if (wrapped.length > 7) {
-		quoteFontSize = 14;
-		wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
+	let wrapped = [];
+	if (hasText) {
+		wrapped = wrapQuoteText(cleanText, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
+		if (wrapped.length > 7) {
+			quoteFontSize = 14;
+			wrapped = wrapQuoteText(cleanText, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
+		}
+		if (wrapped.length > 10) {
+			wrapped = wrapped.slice(0, 10);
+			const lastLine = wrapped[wrapped.length - 1];
+			lastLine.tokens = [...lastLine.tokens.slice(0, Math.max(1, lastLine.tokens.length - 2)), "..."];
+			lastLine.widthPx = Math.min(maxContentW, lastLine.widthPx + 12);
+		}
 	}
-	if (wrapped.length > 10) {
-		wrapped = wrapped.slice(0, 10);
-		const lastLine = wrapped[wrapped.length - 1];
-		lastLine.tokens = [...lastLine.tokens.slice(0, Math.max(1, lastLine.tokens.length - 2)), "..."];
-		lastLine.widthPx = Math.min(maxContentW, lastLine.widthPx + 12);
-	}
-	const imageGap = imgBuf ? 10 : 0;
-	if (!imgBuf && wrapped.length === 0) {
+
+	if (!hasImage && wrapped.length === 0) {
 		throw new Error("Teks IQC tidak mengandung karakter yang dapat ditampilkan.");
 	}
 
@@ -447,24 +516,54 @@ async function createIqcImage(options) {
 	const timeW = textFont.measurePx(bubbleTime, timeFontSize);
 	const timeGap = 10;
 
-	const lastLine = wrapped[wrapped.length - 1];
-	const inlineTimeFits = wrapped.length > 0 && lastLine.widthPx + timeGap + timeW <= maxContentW;
-	const lineWidths = wrapped.map((l) => l.widthPx);
-	if (imgBuf) lineWidths.push(imageW);
-	const widestLineW = Math.max(...lineWidths, timeW);
+	let bubbleW = 0;
+	let bubbleH = 0;
+	let captionH = 0;
+	const captionPadTop = 6;
+	const captionPadBottom = 8;
 
-	const bubbleW = Math.min(maxBubbleW, Math.max(92, Math.ceil(widestLineW + bubblePadX * 2)));
-	const extraTimeRowH = inlineTimeFits ? 0 : 16;
-	const bubbleH = Math.ceil(
-		bubblePadY * 2 + (imgBuf ? imageH + imageGap : 0) + wrapped.length * lineH + extraTimeRowH - 2
-	);
-	const imageTopY = bubblePadY + (imgBuf ? imageH + imageGap : 0);
+	if (hasImage && !hasText) {
+		// Gambar saja tanpa caption
+		bubbleW = imageW;
+		bubbleH = imageH;
+	} else if (hasImage && hasText) {
+		// Gambar dengan caption
+		bubbleW = imageW;
+		const lastLine = wrapped[wrapped.length - 1];
+		const inlineTimeFits = wrapped.length > 0 && lastLine.widthPx + timeGap + timeW <= maxContentW;
+		const extraTimeRowH = inlineTimeFits ? 0 : 16;
+		captionH = captionPadTop + wrapped.length * lineH + extraTimeRowH + captionPadBottom;
 
-	const reactionH = 54;
-	const reactionW = 330;
-	const menuH = CONTEXT_MENU_ITEMS.length * 46; // 322
-	const menuW = 272;
-	const stackGap = 7;
+		const maxTotalBubbleH = 370;
+		if (imageH + captionH > maxTotalBubbleH) {
+			imageH = Math.max(130, maxTotalBubbleH - captionH);
+		}
+		bubbleH = imageH + captionH;
+	} else {
+		// Teks saja
+		const lastLine = wrapped[wrapped.length - 1];
+		const inlineTimeFits = wrapped.length > 0 && lastLine.widthPx + timeGap + timeW <= maxContentW;
+		const lineWidths = wrapped.map((l) => l.widthPx);
+		const widestLineW = Math.max(...lineWidths, timeW);
+		bubbleW = Math.min(maxBubbleW, Math.max(92, Math.ceil(widestLineW + bubblePadX * 2)));
+		const extraTimeRowH = inlineTimeFits ? 0 : 16;
+		bubbleH = Math.ceil(bubblePadY * 2 + wrapped.length * lineH + extraTimeRowH - 2);
+	}
+
+	// Reaction Pill layout (7 emoji + 1 tombol plus)
+	const reactionH = 52;
+	const emojiSize = 30;
+	const reactionPadX = 14;
+	const emojiGap = 12;
+	const plusBtnSize = 30;
+	const reactionW = reactionPadX * 2 + REACTION_EMOJIS.length * (emojiSize + emojiGap) + plusBtnSize;
+
+	// Context Menu layout (7 baris, teks di sebelah kanan ikon seperti iOS asli)
+	const contextMenuItems = hasImage ? IMAGE_CONTEXT_MENU_ITEMS : TEXT_CONTEXT_MENU_ITEMS;
+	const menuRowH = 46;
+	const menuH = contextMenuItems.length * menuRowH;
+	const menuW = 270;
+	const stackGap = 8;
 
 	const totalStackH = reactionH + stackGap + bubbleH + stackGap + menuH;
 	const areaTop = 76;
@@ -473,6 +572,7 @@ async function createIqcImage(options) {
 
 	const isRight = side === "you";
 	const marginSide = 16;
+
 	const reactionX = isRight ? CARD_W - marginSide - reactionW : marginSide;
 	const reactionY = stackTop;
 
@@ -482,7 +582,21 @@ async function createIqcImage(options) {
 	const menuX = isRight ? CARD_W - marginSide - menuW : marginSide;
 	const menuY = bubbleY + bubbleH + stackGap;
 
-	// 2. Render latar belakang + header WA + input bawah, tempel avatar bila ada, lalu BLUR penuh
+	const plusCenterX = reactionX + reactionPadX + REACTION_EMOJIS.length * (emojiSize + emojiGap) + plusBtnSize / 2;
+	const plusCenterY = reactionY + reactionH / 2;
+
+	let imgPillX = 0;
+	let imgPillY = 0;
+	let imgPillW = 0;
+	let imgPillH = 0;
+	if (hasImage && !hasText) {
+		imgPillW = Math.ceil(timeW) + 12;
+		imgPillH = 18;
+		imgPillX = bubbleX + bubbleW - imgPillW - 12;
+		imgPillY = bubbleY + bubbleH - imgPillH - 8;
+	}
+
+	// 2. Render latar belakang blur
 	const bgComposites = [];
 	if (avatarBuffer) {
 		try {
@@ -511,7 +625,7 @@ async function createIqcImage(options) {
 		.png()
 		.toBuffer();
 
-	// 3. Bangun layer foreground SVG (StatusBar iPhone SF Symbols & Bubble + Reaction Pill + ContextMenu)
+	// 3. Bangun layer foreground dasar (Status Bar, Reaction Pill dasar, Bubble Fill, Menu Container)
 	const pct = Math.min(100, Math.max(5, Math.round(battery)));
 	const isLowBat = pct <= 20;
 	const batBodyW = 25;
@@ -525,22 +639,8 @@ async function createIqcImage(options) {
 	const bubblePath = buildBubblePath(bubbleX, bubbleY, bubbleW, bubbleH, isRight);
 	const bubbleFill = isRight ? "#075E54" : "#272729";
 
-	const menuRowsSvg = CONTEXT_MENU_ITEMS.map((item, idx) => {
-		const rowY = menuY + idx * 46;
-		const iconColor = item.destructive ? "#D94E43" : "#FFFFFF";
-		const divider =
-			idx < CONTEXT_MENU_ITEMS.length - 1
-				? `<line x1="${menuX}" y1="${rowY + 46}" x2="${menuX + menuW}" y2="${rowY + 46}" stroke="rgba(255,255,255,0.08)" stroke-width="0.6"/>`
-				: "";
-		return `
-      <g transform="translate(${menuX + menuW - 34}, ${rowY + 12})" color="${iconColor}">
-        <svg width="21" height="21" viewBox="0 0 24 24">${item.iconSvg}</svg>
-      </g>
-      ${divider}`;
-	}).join("\n");
-
 	const fgSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${OUT_W}" height="${OUT_H}" viewBox="0 0 ${CARD_W} ${CARD_H}">
-  <!-- StatusBar iPhone: 4 bar sinyal pil + WiFi wedge SF Symbols + baterai outline dengan pil solid -->
+  <!-- StatusBar iPhone: signal + WiFi + battery -->
   <g transform="translate(328, 21)" color="#FFFFFF">
     <rect x="0" y="7.5" width="3.1" height="4.5" rx="1.45" fill="currentColor"/>
     <rect x="4.7" y="5.2" width="3.1" height="6.8" rx="1.45" fill="currentColor"/>
@@ -557,39 +657,109 @@ async function createIqcImage(options) {
     <rect x="${batX + batInnerPad}" y="${batY + batInnerPad}" width="${batFillW}" height="${batBodyH - batInnerPad * 2}" rx="1.8" fill="${isLowBat ? "#FFD60A" : "#FFFFFF"}"/>
     <path d="M${batX + batBodyW + 1.5} ${batY + 4.1} A2.1 2.1 0 0 1 ${batX + batBodyW + 1.5} ${batY + 8.5} Z" fill="rgba(255,255,255,0.45)"/>
   </g>
-  <!-- EmojiReactions Pill -->
-  <rect x="${reactionX}" y="${reactionY}" width="${reactionW}" height="${reactionH}" rx="27" fill="rgba(46,46,49,0.92)"/>
-  <circle cx="${reactionX + 20 + 6 * 43 + 15.5}" cy="${reactionY + 27}" r="15.5" fill="rgba(255,255,255,0.20)"/>
-  <g transform="translate(${reactionX + 20 + 6 * 43 + 5.5}, ${reactionY + 17})">
-    <svg width="20" height="20" viewBox="0 0 24 24">
-      <path d="M12 4.5V19.5M4.5 12H19.5" stroke="#C7C7CC" stroke-width="2.4" stroke-linecap="round" fill="none"/>
-    </svg>
-  </g>
+  <!-- EmojiReactions Pill Background -->
+  <rect x="${reactionX}" y="${reactionY}" width="${reactionW}" height="${reactionH}" rx="${reactionH / 2}" fill="rgba(44,44,46,0.92)"/>
   <!-- Highlighted ChatBubble -->
   <path d="${bubblePath}" fill="${bubbleFill}"/>
-
-  <!-- ContextMenu -->
-  <rect x="${menuX}" y="${menuY}" width="${menuW}" height="${menuH}" rx="18" fill="rgba(37,37,39,0.90)"/>
-  ${menuRowsSvg}
+  <!-- ContextMenu Container -->
+  <rect x="${menuX}" y="${menuY}" width="${menuW}" height="${menuH}" rx="18" fill="rgba(37,37,39,0.92)"/>
 </svg>`;
 
 	const composites = [{ input: Buffer.from(fgSvg), top: 0, left: 0 }];
-	if (imgBuf) {
+
+	// 4. Proses masking gambar (jika ada lampiran gambar)
+	if (hasImage && !hasText) {
+		// Gambar saja tanpa caption: bentuk seluruh bubble mengikuti bubblePath (dengan ekor & sudut melengkung)
+		const pad = 8;
+		const maskW = bubbleW + pad * 2;
+		const maskH = bubbleH + pad * 2;
+		const maskPath = buildBubblePath(pad, pad, bubbleW, bubbleH, isRight);
+		const maskSvg = Buffer.from(
+			`<svg xmlns="http://www.w3.org/2000/svg" width="${maskW * SCALE}" height="${maskH * SCALE}" viewBox="0 0 ${maskW} ${maskH}">
+				<path d="${maskPath}" fill="#ffffff"/>
+			</svg>`
+		);
+
+		const maskedImg = await sharp(imageBuffer)
+			.resize(bubbleW * SCALE, bubbleH * SCALE, { fit: "cover", position: "center" })
+			.extend({
+				top: pad * SCALE,
+				bottom: pad * SCALE,
+				left: pad * SCALE,
+				right: pad * SCALE,
+				background: { r: 0, g: 0, b: 0, alpha: 0 },
+			})
+			.composite([{ input: maskSvg, blend: "dest-in" }])
+			.png()
+			.toBuffer();
+
 		composites.push({
-			input: imgBuf,
-			left: Math.round((bubbleX + bubblePadX) * SCALE),
-			top: Math.round((bubbleY + bubblePadY) * SCALE),
+			input: maskedImg,
+			left: Math.round((bubbleX - pad) * SCALE),
+			top: Math.round((bubbleY - pad) * SCALE),
+		});
+	} else if (hasImage && hasText) {
+		// Gambar dengan caption: bagian atas gambar melengkung, bagian bawah datar bertemu caption
+		const topMaskPath = buildImageTopPath(0, 0, bubbleW, imageH);
+		const maskSvg = Buffer.from(
+			`<svg xmlns="http://www.w3.org/2000/svg" width="${bubbleW * SCALE}" height="${imageH * SCALE}" viewBox="0 0 ${bubbleW} ${imageH}">
+				<path d="${topMaskPath}" fill="#ffffff"/>
+			</svg>`
+		);
+
+		const maskedImg = await sharp(imageBuffer)
+			.resize(bubbleW * SCALE, imageH * SCALE, { fit: "cover", position: "center" })
+			.composite([{ input: maskSvg, blend: "dest-in" }])
+			.png()
+			.toBuffer();
+
+		composites.push({
+			input: maskedImg,
+			left: Math.round(bubbleX * SCALE),
+			top: Math.round(bubbleY * SCALE),
 		});
 	}
 
+	// 5. Overlay SVG di atas gambar (Pill jam di gambar, ikon menu konteks di kiri baris, tombol plus)
+	const menuRowsSvg = contextMenuItems.map((item, idx) => {
+		const rowY = menuY + idx * menuRowH;
+		const iconColor = item.destructive ? "#FF453A" : "#FFFFFF";
+		const divider =
+			idx < contextMenuItems.length - 1
+				? `<line x1="${menuX + 50}" y1="${rowY + menuRowH}" x2="${menuX + menuW}" y2="${rowY + menuRowH}" stroke="rgba(255,255,255,0.08)" stroke-width="0.6"/>`
+				: "";
+		return `
+      <g transform="translate(${menuX + 18}, ${rowY + 13})" color="${iconColor}">
+        <svg width="20" height="20" viewBox="0 0 24 24">${item.iconSvg}</svg>
+      </g>
+      ${divider}`;
+	}).join("\n");
+
+	const overlaySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="${OUT_W}" height="${OUT_H}" viewBox="0 0 ${CARD_W} ${CARD_H}">
+  <!-- Tombol plus pada Reaction Pill -->
+  <circle cx="${plusCenterX}" cy="${plusCenterY}" r="${plusBtnSize / 2}" fill="rgba(255,255,255,0.18)"/>
+  <g transform="translate(${plusCenterX - 10}, ${plusCenterY - 10})">
+    <svg width="20" height="20" viewBox="0 0 24 24">
+      <path d="M12 4.5V19.5M4.5 12H19.5" stroke="#C7C7CC" stroke-width="2.3" stroke-linecap="round" fill="none"/>
+    </svg>
+  </g>
+  ${hasImage && !hasText ? `<!-- Pill gelap untuk jam pada gambar tanpa caption -->
+  <rect x="${imgPillX}" y="${imgPillY}" width="${imgPillW}" height="${imgPillH}" rx="9" fill="rgba(0,0,0,0.50)"/>` : ""}
+  <!-- Ikon & Divider Menu Konteks (Ikon di sebelah kiri) -->
+  ${menuRowsSvg}
+</svg>`;
+
+	composites.push({ input: Buffer.from(overlaySvg), top: 0, left: 0 });
+
+	// Reaction emojis
 	for (let i = 0; i < REACTION_EMOJIS.length; i++) {
 		const emojiPath = reactionPaths[i];
 		if (!emojiPath) continue;
-		const resized = await sharp(emojiPath).resize(30 * SCALE, 30 * SCALE, { fit: "contain" }).png().toBuffer();
+		const resized = await sharp(emojiPath).resize(emojiSize * SCALE, emojiSize * SCALE, { fit: "contain" }).png().toBuffer();
 		composites.push({
 			input: resized,
-			left: (reactionX + 20 + i * 43) * SCALE,
-			top: (reactionY + 12) * SCALE,
+			left: Math.round((reactionX + reactionPadX + i * (emojiSize + emojiGap)) * SCALE),
+			top: Math.round((reactionY + (reactionH - emojiSize) / 2) * SCALE),
 		});
 	}
 
@@ -630,88 +800,102 @@ async function createIqcImage(options) {
 			baselineY: 32.5,
 		});
 
-		// Isi teks bubble + emoji inline
-		const emojiDrawSize = Math.round(quoteFontSize * 1.12);
-		for (let i = 0; i < wrapped.length; i++) {
-			const line = wrapped[i];
-			const lineBaseline = bubbleY + imageTopY + quoteFontSize * 0.92 + i * lineH;
-			let penX = bubbleX + bubblePadX;
-			let run = "";
-			let runFont = textFont;
-			let runFontPath = sfTextRegPath;
+		// Isi teks caption / bubble (jika ada teks)
+		if (hasText) {
+			const emojiDrawSize = Math.round(quoteFontSize * 1.12);
+			const captionStartY = bubbleY + (hasImage ? imageH + captionPadTop : bubblePadY);
 
-			const flushText = async () => {
-				if (!run) return;
-				await addDrawText({
-					text: run,
-					fontPath: runFontPath,
-					size: quoteFontSize,
-					color: "#FFFFFF",
-					xExpr: String(Math.round(penX * SCALE)),
-					baselineY: lineBaseline,
-				});
-				for (const ch of run) {
-					if (runFont.hasGlyph(ch)) penX += runFont.advancePx(ch, quoteFontSize);
-				}
-				run = "";
-			};
+			for (let i = 0; i < wrapped.length; i++) {
+				const line = wrapped[i];
+				const lineBaseline = captionStartY + quoteFontSize * 0.92 + i * lineH;
+				let penX = bubbleX + bubblePadX;
+				let run = "";
+				let runFont = textFont;
+				let runFontPath = sfTextRegPath;
 
-			for (const tok of line.tokens) {
-				if (quoteEmojiMap.has(tok)) {
-					await flushText();
-					const resized = await sharp(quoteEmojiMap.get(tok))
-						.resize(emojiDrawSize * SCALE, emojiDrawSize * SCALE, { fit: "contain" })
-						.png()
-						.toBuffer();
-					composites.push({
-						input: resized,
-						left: Math.round(penX * SCALE),
-						top: Math.round((lineBaseline - quoteFontSize * 0.85) * SCALE),
+				const flushText = async () => {
+					if (!run) return;
+					await addDrawText({
+						text: run,
+						fontPath: runFontPath,
+						size: quoteFontSize,
+						color: "#FFFFFF",
+						xExpr: String(Math.round(penX * SCALE)),
+						baselineY: lineBaseline,
 					});
-					penX += quoteFontSize * 1.15;
-				} else {
-					for (const ch of tok) {
-						let nextFont = textFont;
-						let nextPath = sfTextRegPath;
-						if (/\s/.test(ch) && run && runFont.hasGlyph(ch)) {
-							nextFont = runFont;
-							nextPath = runFontPath;
-						} else if (!textFont.hasGlyph(ch) && cjkFont && cjkFont.hasGlyph(ch)) {
-							nextFont = cjkFont;
-							nextPath = cjkFontPath;
+					for (const ch of run) {
+						if (runFont.hasGlyph(ch)) penX += runFont.advancePx(ch, quoteFontSize);
+					}
+					run = "";
+				};
+
+				for (const tok of line.tokens) {
+					if (quoteEmojiMap.has(tok)) {
+						await flushText();
+						const resized = await sharp(quoteEmojiMap.get(tok))
+							.resize(emojiDrawSize * SCALE, emojiDrawSize * SCALE, { fit: "contain" })
+							.png()
+							.toBuffer();
+						composites.push({
+							input: resized,
+							left: Math.round(penX * SCALE),
+							top: Math.round((lineBaseline - quoteFontSize * 0.85) * SCALE),
+						});
+						penX += quoteFontSize * 1.15;
+					} else {
+						for (const ch of tok) {
+							let nextFont = textFont;
+							let nextPath = sfTextRegPath;
+							if (/\s/.test(ch) && run && runFont.hasGlyph(ch)) {
+								nextFont = runFont;
+								nextPath = runFontPath;
+							} else if (!textFont.hasGlyph(ch) && cjkFont && cjkFont.hasGlyph(ch)) {
+								nextFont = cjkFont;
+								nextPath = cjkFontPath;
+							}
+							if (run && nextPath !== runFontPath) {
+								await flushText();
+							}
+							runFont = nextFont;
+							runFontPath = nextPath;
+							run += ch;
 						}
-						if (run && nextPath !== runFontPath) {
-							await flushText();
-						}
-						runFont = nextFont;
-						runFontPath = nextPath;
-						run += ch;
 					}
 				}
+				await flushText();
 			}
-			await flushText();
+
+			// Timestamp di pojok kanan bawah bubble
+			await addDrawText({
+				text: bubbleTime,
+				fontPath: sfTextRegPath,
+				size: timeFontSize,
+				color: "0xffffff@0.48",
+				xExpr: String(Math.round((bubbleX + bubbleW - bubblePadX - timeW) * SCALE)),
+				baselineY: bubbleY + bubbleH - 7,
+			});
+		} else if (hasImage) {
+			// Jam di dalam gambar tanpa caption (di dalam pill hitam)
+			await addDrawText({
+				text: bubbleTime,
+				fontPath: sfTextRegPath,
+				size: timeFontSize,
+				color: "#FFFFFF",
+				xExpr: String(Math.round((imgPillX + 6) * SCALE)),
+				baselineY: imgPillY + 13.5,
+			});
 		}
 
-		// Timestamp di pojok kanan bawah bubble
-		await addDrawText({
-			text: bubbleTime,
-			fontPath: sfTextRegPath,
-			size: timeFontSize,
-			color: "0xffffff@0.48",
-			xExpr: String(Math.round((bubbleX + bubbleW - bubblePadX - timeW) * SCALE)),
-			baselineY: bubbleY + bubbleH - 7,
-		});
-
-		// 7 label menu konteks
-		for (let idx = 0; idx < CONTEXT_MENU_ITEMS.length; idx++) {
-			const item = CONTEXT_MENU_ITEMS[idx];
+		// 7 label teks menu konteks di sebelah kanan ikon
+		for (let idx = 0; idx < contextMenuItems.length; idx++) {
+			const item = contextMenuItems[idx];
 			await addDrawText({
 				text: item.label,
 				fontPath: sfTextRegPath,
 				size: 16,
-				color: item.destructive ? "#D94E43" : "#FFFFFF",
-				xExpr: String((menuX + 16) * SCALE),
-				baselineY: menuY + idx * 46 + 28.5,
+				color: item.destructive ? "#FF453A" : "#FFFFFF",
+				xExpr: String(Math.round((menuX + 52) * SCALE)),
+				baselineY: menuY + idx * menuRowH + 28.5,
 			});
 		}
 
