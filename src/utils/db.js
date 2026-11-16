@@ -111,7 +111,7 @@ const stmtTouchUser = db.prepare(`
 		last_seen = excluded.last_seen
 `);
 const stmtListLimits = db.prepare(
-	"SELECT jid, remaining, daily_limit, used FROM users WHERE reset_date = ? ORDER BY remaining DESC, jid ASC"
+		"SELECT jid, name, remaining, daily_limit, used FROM users WHERE reset_date = ? ORDER BY remaining DESC, jid ASC"
 );
 const stmtCountUsers = db.prepare("SELECT COUNT(*) AS n FROM users");
 
@@ -122,6 +122,8 @@ const stmtCountUsers = db.prepare("SELECT COUNT(*) AS n FROM users");
 function touchUser(userId, name = null) {
 	const key = normalizeUserId(userId);
 	if (!key) return null;
+	// Owner tidak dicatat ke database (tidak pakai kuota & tidak perlu tersimpan)
+	if ((config.ownerNumbers || []).includes(key)) return null;
 	const now = Date.now();
 	try {
 		stmtTouchUser.run(key, name || null, defaultLimit(), defaultLimit(), wibDateKey(), now, now);
@@ -167,6 +169,7 @@ function listLimitRows(dateKey = wibDateKey()) {
 	try {
 		return stmtListLimits.all(dateKey).map((row) => ({
 			userId: row.jid,
+			name: row.name || null,
 			remaining: Math.max(0, Number(row.remaining) || 0),
 			limit: Math.max(0, Number(row.daily_limit) || 0),
 			used: Math.max(0, Number(row.used) || 0),
@@ -393,6 +396,14 @@ function pruneOldData() {
 }
 
 migrateLegacyLimitFile();
+// Owner tidak perlu tersimpan di database (tidak pakai kuota, tidak perlu riwayat)
+(config.ownerNumbers || []).forEach((o) => {
+	try {
+		db.prepare("DELETE FROM users WHERE jid = ?").run(String(o).replace(/\D/g, ""));
+	} catch {
+		// Diabaikan
+	}
+});
 pruneOldData();
 
 // Tutup database dengan rapi saat proses berhenti

@@ -634,7 +634,8 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 			const shown = users.slice(0, 40);
 			const lines = shown.map((u, idx) => {
 				const status = u.remaining <= 0 ? "⛔ habis" : `✅ ${u.remaining}/${u.limit}`;
-				return `${idx + 1}. *${u.userId}* — ${status} (terpakai ${u.used})`;
+				const name = u.name ? ` ${u.name}` : "";
+				return `${idx + 1}. *${u.userId}*${name} — ${status} (terpakai ${u.used})`;
 			});
 
 			let body =
