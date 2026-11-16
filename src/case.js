@@ -20,6 +20,7 @@ const {
 	normalizeUserId,
 	defaultLimit,
 } = require("./utils/limitHelper");
+const { listGroups, upsertGroup, deactivateGroup, getStats } = require("./utils/db");
 
 /**
  * Format durasi waktu ke teks terbaca (hari, jam, menit, detik)
@@ -671,8 +672,22 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					(a.subject || "").localeCompare(b.subject || "", "id")
 				);
 
+				// Sinkronkan metadata grup ke SQLite agar tetap ada setelah restart
+				for (const g of groups) {
+					if (g?.id) upsertGroup(g.id, g.subject || null, g.size ?? g.participants?.length ?? null);
+				}
+
 				if (groups.length === 0) {
-					await reply("ℹ️ Bot saat ini belum tergabung di grup mana pun.");
+					const stored = listGroups();
+					if (stored.length === 0) {
+						await reply("ℹ️ Bot saat ini belum tergabung di grup mana pun.");
+						await react("✅");
+						break;
+					}
+					const lines = stored.map(
+						(g, idx) => `${idx + 1}. *${g.subject || "Tanpa Nama"}*\n   👥 ${g.members ?? 0} anggota _(terakhir aktif)_`
+					);
+					await reply(`📋 *DAFTAR GRUP TERSIMPAN (${stored.length})*\n\n${lines.join("\n\n")}`);
 					await react("✅");
 					break;
 				}
@@ -688,6 +703,18 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				await react("✅");
 			} catch (err) {
 				console.error("Error saat mengambil daftar grup:", err);
+				// Fallback ke data yang tersimpan di SQLite
+				const stored = listGroups();
+				if (stored.length > 0) {
+					const lines = stored.map(
+						(g, idx) => `${idx + 1}. *${g.subject || "Tanpa Nama"}*\n   👥 ${g.members ?? 0} anggota _(terakhir aktif)_`
+					);
+					await reply(
+						`⚠️ Gagal menghubungi WhatsApp, menampilkan data tersimpan:\n\n📋 *DAFTAR GRUP (${stored.length})*\n\n${lines.join("\n\n")}`
+					);
+					await react("✅");
+					break;
+				}
 				await react("❌");
 				await reply(`❌ Gagal mengambil daftar grup: ${err.message}`);
 			}
@@ -719,10 +746,14 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				if (groupJid) {
 					try {
 						const meta = await sock.groupMetadata(groupJid);
-						if (meta?.subject) groupName = `*${meta.subject}*`;
+						if (meta?.subject) {
+							groupName = `*${meta.subject}*`;
+							upsertGroup(groupJid, meta.subject, meta.participants?.length ?? meta.size ?? null);
+						}
 					} catch (e) {
 						// Abaikan jika gagal mengambil nama grup
 					}
+					if (groupName === "grup") upsertGroup(groupJid);
 				}
 				await reply(`✅ Berhasil bergabung ke ${groupName}!`);
 				await react("✅");
@@ -755,6 +786,7 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				await react("✅");
 				try {
 					await sock.groupLeave(from);
+					deactivateGroup(from);
 				} catch (err) {
 					console.error("Error saat leave grup:", err);
 					await react("❌");
@@ -802,10 +834,12 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					await reply("👋 Bot keluar dari grup ini.");
 					await react("✅");
 					await sock.groupLeave(targetJid);
+					deactivateGroup(targetJid);
 				} else {
 					await sock.groupLeave(targetJid);
 					await reply(`✅ Berhasil keluar dari grup *${targetName}*.`);
 					await react("✅");
+					deactivateGroup(targetJid);
 				}
 			} catch (err) {
 				console.error("Error saat leave grup:", err);

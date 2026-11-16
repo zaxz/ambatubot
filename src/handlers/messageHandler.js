@@ -4,6 +4,7 @@ const { checkAutoReply } = require("./autoReplyHandler");
 const { generateReply } = require("../utils/aiClient");
 const { downloadMediaBuffer, webpToImage } = require("../utils/mediaHelper");
 const { getLimitInfo, consumeLimit } = require("../utils/limitHelper");
+const { touchUser, appendChatMessage, getChatHistory, upsertGroup } = require("../utils/db");
 const handleCase = require("../case");
 
 const startTime = Date.now();
@@ -11,11 +12,8 @@ const startTime = Date.now();
 const aiCooldownMap = new Map();
 // Cache agar peringatan "limit habis" tidak dikirim berulang-ulang ke user yang sama
 const limitNoticeMap = new Map();
-// Memori chat singkat per percakapan agar AI nyambung dengan konteks sebelumnya
-const chatHistoryMap = new Map();
-const MAX_HISTORY_MESSAGES = 10;
-const MAX_HISTORY_CHATS = 100;
-const MAX_HISTORY_AGE_MS = 30 * 60 * 1000;
+// Grup yang sudah dicatat ke SQLite pada proses ini (hindari write berulang)
+const recordedGroups = new Set();
 const MAX_AI_IMAGE_BYTES = 5 * 1024 * 1024;
 const SUPPORTED_AI_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
@@ -39,36 +37,6 @@ function extractMessageText(unwrappedMsg, msgType) {
 	if (msgType === "videoMessage") return unwrappedMsg.videoMessage?.caption || "";
 	if (msgType === "documentMessage") return unwrappedMsg.documentMessage?.caption || "";
 	return "";
-}
-
-function getChatHistory(chatJid) {
-	const entries = chatHistoryMap.get(chatJid);
-	if (!entries) return [];
-	const cutoff = Date.now() - MAX_HISTORY_AGE_MS;
-	const fresh = entries.filter((e) => e.timestamp >= cutoff);
-	if (fresh.length !== entries.length) {
-		if (fresh.length > 0) chatHistoryMap.set(chatJid, fresh);
-		else chatHistoryMap.delete(chatJid);
-	}
-	return fresh.map(({ role, text }) => ({ role, text }));
-}
-
-function appendChatHistory(chatJid, role, text) {
-	if (!chatJid || !text) return;
-	const cleaned = text.trim().slice(0, 450);
-	if (!cleaned) return;
-
-	if (!chatHistoryMap.has(chatJid) && chatHistoryMap.size >= MAX_HISTORY_CHATS) {
-		const oldestKey = chatHistoryMap.keys().next().value;
-		if (oldestKey) chatHistoryMap.delete(oldestKey);
-	}
-
-	const entries = chatHistoryMap.get(chatJid) || [];
-	entries.push({ role, text: cleaned, timestamp: Date.now() });
-	if (entries.length > MAX_HISTORY_MESSAGES) {
-		entries.splice(0, entries.length - MAX_HISTORY_MESSAGES);
-	}
-	chatHistoryMap.set(chatJid, entries);
 }
 
 function normalizeImageMime(rawMime) {
@@ -179,9 +147,17 @@ async function getChatLabel(sock, from, isGroup) {
 	try {
 		const meta = await sock.groupMetadata(from);
 		const name = meta?.subject || "Grup";
+		const members = meta?.participants?.length ?? meta?.size ?? null;
 		groupNameCache.set(from, name);
+		upsertGroup(from, name, members);
+		recordedGroups.add(from);
 		return `${color.magenta}[GRUP: ${name}]${color.reset}`;
 	} catch (e) {
+		// Tetap catat grupnya walau nama gagal diambil (sekali per proses)
+		if (!recordedGroups.has(from)) {
+			upsertGroup(from);
+			recordedGroups.add(from);
+		}
 		return `${color.magenta}[GRUP]${color.reset}`;
 	}
 }
@@ -241,6 +217,10 @@ async function handleMessage(sock, m) {
 			m.key.participantAlt || m.key.remoteJidAlt || senderPnAlt || (String(sender).endsWith("@lid") ? "" : sender);
 		const limitUserId = String(pnIdentity || sender || from).split(":")[0].replace(/[^0-9]/g, "");
 		const limitEnabled = config.chatLimit?.enabled !== false;
+
+		// Simpan identitas user (nama, jumlah pesan, terakhir aktif) ke SQLite
+		touchUser(limitUserId, pushName);
+
 		// Ekstraksi pesan aktual (antisipasi ephemeral & viewOnce wrapper)
 		let msg = unwrapMessage(m.message);
 		if (!msg) return;
@@ -461,8 +441,8 @@ async function handleMessage(sock, m) {
 						}
 					}
 					const userHistoryText = isGroup ? `[${pushName}]: ${cleanMessage}` : cleanMessage;
-					appendChatHistory(from, "user", userHistoryText);
-					appendChatHistory(from, "model", aiReply);
+					appendChatMessage(from, limitUserId, "user", userHistoryText);
+					appendChatMessage(from, limitUserId, "model", aiReply);
 					const aiPreview = (aiReply.length > 70 ? aiReply.slice(0, 70) + "…" : aiReply).replace(/\n/g, `\n${color.cyan}`);
 					console.log(`${color.dim}[${getTimestamp()}]${color.reset} ${color.cyan}${color.bold}[AI]${color.reset}  Membalas ${color.bold}[${pushName}]${color.reset}: ${color.cyan}"${aiPreview}"${color.reset}`);
 				} catch (err) {
@@ -485,7 +465,7 @@ async function handleMessage(sock, m) {
 		if (!isCommand && trimmedBody) {
 			// Simpan obrolan biasa ke memori agar AI nyambung jika di-mention setelahnya
 			const historyLine = isGroup ? `[${pushName}]: ${displayBody}` : displayBody;
-			appendChatHistory(from, "user", historyLine);
+			appendChatMessage(from, limitUserId, "user", historyLine);
 
 			if (config.autoReply.privateOnly && isGroup) {
 				return; // Jangan respon di grup jika disetel khusus chat pribadi
