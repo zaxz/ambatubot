@@ -304,37 +304,36 @@ function buildBlurredBackdropSvg({ hasAvatar }) {
 </svg>`;
 }
 
-/** Path bubble WhatsApp iOS dengan ekor kecil di sudut bawah kiri atau kanan. */
-function buildBubblePath(x, y, w, h, isRight) {
-	const r = 16;
+/** Path bubble WhatsApp iOS dengan sudut melengkung halus konsentris dan ekor di sudut bawah. */
+function buildBubblePath(x, y, w, h, isRight, r = 18) {
 	if (isRight) {
 		return [
 			`M ${x + r} ${y}`,
 			`L ${x + w - r} ${y}`,
-			`Q ${x + w} ${y} ${x + w} ${y + r}`,
+			`A ${r} ${r} 0 0 1 ${x + w} ${y + r}`,
 			`L ${x + w} ${y + h - 8}`,
 			`Q ${x + w} ${y + h - 1} ${x + w + 5} ${y + h}`,
 			`Q ${x + w - 4} ${y + h} ${x + w - 10} ${y + h - 2}`,
 			`Q ${x + w - 13} ${y + h} ${x + w - r} ${y + h}`,
 			`L ${x + r} ${y + h}`,
-			`Q ${x} ${y + h} ${x} ${y + h - r}`,
+			`A ${r} ${r} 0 0 1 ${x} ${y + h - r}`,
 			`L ${x} ${y + r}`,
-			`Q ${x} ${y} ${x + r} ${y}`,
+			`A ${r} ${r} 0 0 1 ${x + r} ${y}`,
 			"Z",
 		].join(" ");
 	}
 	return [
 		`M ${x + r} ${y}`,
 		`L ${x + w - r} ${y}`,
-		`Q ${x + w} ${y} ${x + w} ${y + r}`,
+		`A ${r} ${r} 0 0 1 ${x + w} ${y + r}`,
 		`L ${x + w} ${y + h - r}`,
-		`Q ${x + w} ${y + h} ${x + w - r} ${y + h}`,
+		`A ${r} ${r} 0 0 1 ${x + w - r} ${y + h}`,
 		`L ${x + 12} ${y + h}`,
 		`Q ${x + 7} ${y + h} ${x + 4} ${y + h - 2}`,
 		`Q ${x - 1} ${y + h} ${x - 5} ${y + h}`,
 		`Q ${x} ${y + h - 3} ${x} ${y + h - 9}`,
 		`L ${x} ${y + r}`,
-		`Q ${x} ${y} ${x + r} ${y}`,
+		`A ${r} ${r} 0 0 1 ${x + r} ${y}`,
 		"Z",
 	].join(" ");
 }
@@ -403,9 +402,10 @@ async function createIqcImage(options) {
 	const bubblePadY = 10;
 	const maxContentW = maxBubbleW - bubblePadX * 2;
 
-	// Border pembatas di sekeliling gambar (persis seperti contoh WhatsApp iOS)
-	const imgBorder = 3;
-	const imgRadius = 13;
+	const bubbleRadius = 18;
+	// Border pembatas di sekeliling gambar dipertebal (persis seperti contoh WhatsApp iOS)
+	const imgBorder = 4.5;
+	const imgRadius = bubbleRadius - imgBorder; // 13.5 (konsentris sempurna dengan lengkungan bubble)
 
 	let imageW = 0;
 	let imageH = 0;
@@ -541,7 +541,7 @@ async function createIqcImage(options) {
 	const batX = 378;
 	const batY = 20.5;
 
-	const bubblePath = buildBubblePath(bubbleX, bubbleY, bubbleW, bubbleH, isRight);
+	const bubblePath = buildBubblePath(bubbleX, bubbleY, bubbleW, bubbleH, isRight, bubbleRadius);
 	const bubbleFill = isRight ? "#075E54" : "#272729";
 
 	const menuRowsSvg = CONTEXT_MENU_ITEMS.map((item, idx) => {
@@ -599,9 +599,21 @@ async function createIqcImage(options) {
 		const imgX = bubbleX + imgBorder;
 		const imgY = bubbleY + imgBorder;
 
+		const rTop = imgRadius;
+		const rBot = hasText ? 4 : imgRadius;
 		const imgMaskSvg = Buffer.from(
 			`<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(imageW * SCALE)}" height="${Math.round(imageH * SCALE)}" viewBox="0 0 ${imageW} ${imageH}">
-				<rect x="0" y="0" width="${imageW}" height="${imageH}" rx="${imgRadius}" fill="#ffffff"/>
+				<path d="
+					M 0 ${rTop}
+					A ${rTop} ${rTop} 0 0 1 ${rTop} 0
+					L ${imageW - rTop} 0
+					A ${rTop} ${rTop} 0 0 1 ${imageW} ${rTop}
+					L ${imageW} ${imageH - rBot}
+					A ${rBot} ${rBot} 0 0 1 ${imageW - rBot} ${imageH}
+					L ${rBot} ${imageH}
+					A ${rBot} ${rBot} 0 0 1 0 ${imageH - rBot}
+					Z
+				" fill="#ffffff"/>
 			</svg>`
 		);
 
