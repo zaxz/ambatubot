@@ -359,11 +359,14 @@ async function createIqcImage(options) {
 		text,
 		side = "other",
 		avatarBuffer = null,
+		imageBuffer = null,
+		imageMime = null,
 		time = getCurrentIphoneTime(),
 		battery = 100,
 	} = options;
 
-	if (!text || !String(text).trim()) {
+	const hasImage = Boolean(imageBuffer);
+	if (!hasImage && (!text || !String(text).trim())) {
 		throw new Error("Teks pesan IQC tidak boleh kosong.");
 	}
 
@@ -399,6 +402,27 @@ async function createIqcImage(options) {
 	const bubblePadX = 14;
 	const bubblePadY = 10;
 	const maxContentW = maxBubbleW - bubblePadX * 2;
+	// Siapkan buffer gambar yang akan dirender di dalam bubble (kalau ada)
+	let imgBuf = null;
+	let imageW = 0;
+	let imageH = 0;
+	const imageMaxH = 260;
+	if (hasImage && imageBuffer) {
+		try {
+			const meta = await sharp(imageBuffer).metadata();
+			const aspect = (meta.height && meta.width) ? meta.height / meta.width : 1;
+			imageW = maxContentW;
+			imageH = Math.min(Math.round(imageW * aspect), imageMaxH);
+			imgBuf = await sharp(imageBuffer)
+				.resize(imageW, imageH, { fit: "cover", position: "center" })
+				.png()
+				.toBuffer();
+		} catch (e) {
+			imgBuf = null;
+			imageW = 0;
+			imageH = 0;
+		}
+	}
 
 	let quoteFontSize = 15.5;
 	let wrapped = wrapQuoteText(text, textFont, quoteEmojiMap, quoteFontSize, maxContentW, cjkFont);
@@ -412,7 +436,8 @@ async function createIqcImage(options) {
 		lastLine.tokens = [...lastLine.tokens.slice(0, Math.max(1, lastLine.tokens.length - 2)), "..."];
 		lastLine.widthPx = Math.min(maxContentW, lastLine.widthPx + 12);
 	}
-	if (wrapped.length === 0) {
+	const imageGap = imgBuf ? 10 : 0;
+	if (!imgBuf && wrapped.length === 0) {
 		throw new Error("Teks IQC tidak mengandung karakter yang dapat ditampilkan.");
 	}
 
@@ -423,15 +448,17 @@ async function createIqcImage(options) {
 	const timeGap = 10;
 
 	const lastLine = wrapped[wrapped.length - 1];
-	const inlineTimeFits = lastLine.widthPx + timeGap + timeW <= maxContentW;
-	const widestLineW = Math.max(
-		...wrapped.map((l, idx) => (idx === wrapped.length - 1 && inlineTimeFits ? l.widthPx + timeGap + timeW : l.widthPx)),
-		timeW
-	);
+	const inlineTimeFits = wrapped.length > 0 && lastLine.widthPx + timeGap + timeW <= maxContentW;
+	const lineWidths = wrapped.map((l) => l.widthPx);
+	if (imgBuf) lineWidths.push(imageW);
+	const widestLineW = Math.max(...lineWidths, timeW);
 
 	const bubbleW = Math.min(maxBubbleW, Math.max(92, Math.ceil(widestLineW + bubblePadX * 2)));
 	const extraTimeRowH = inlineTimeFits ? 0 : 16;
-	const bubbleH = Math.ceil(bubblePadY * 2 + wrapped.length * lineH + extraTimeRowH - 2);
+	const bubbleH = Math.ceil(
+		bubblePadY * 2 + (imgBuf ? imageH + imageGap : 0) + wrapped.length * lineH + extraTimeRowH - 2
+	);
+	const imageTopY = bubblePadY + (imgBuf ? imageH + imageGap : 0);
 
 	const reactionH = 54;
 	const reactionW = 330;
@@ -547,6 +574,13 @@ async function createIqcImage(options) {
 </svg>`;
 
 	const composites = [{ input: Buffer.from(fgSvg), top: 0, left: 0 }];
+	if (imgBuf) {
+		composites.push({
+			input: imgBuf,
+			left: Math.round((bubbleX + bubblePadX) * SCALE),
+			top: Math.round((bubbleY + bubblePadY) * SCALE),
+		});
+	}
 
 	for (let i = 0; i < REACTION_EMOJIS.length; i++) {
 		const emojiPath = reactionPaths[i];
@@ -600,7 +634,7 @@ async function createIqcImage(options) {
 		const emojiDrawSize = Math.round(quoteFontSize * 1.12);
 		for (let i = 0; i < wrapped.length; i++) {
 			const line = wrapped[i];
-			const lineBaseline = bubbleY + bubblePadY + quoteFontSize * 0.92 + i * lineH;
+			const lineBaseline = bubbleY + imageTopY + quoteFontSize * 0.92 + i * lineH;
 			let penX = bubbleX + bubblePadX;
 			let run = "";
 			let runFont = textFont;

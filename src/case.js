@@ -113,8 +113,8 @@ async function handleCase(context) {
 ┃   _Bikin stiker teks brat bergerak kata demi kata._
 ┃ • *${prefix}toimg*
 ┃   _Ubah stiker jadi gambar kembali._
-┃ • *${prefix}iqc* <teks>
-┃   _Bikin iPhone Quoted Chat (kiri default, atau aku | teks untuk kanan)._
+┃ • *${prefix}iqc* <teks> / balas gambar
+┃   _Bikin iPhone Quoted Chat (teks, gambar, atau gambar + caption)._
 ┣━━━❰ 📚 *AKADEMIK & JADWAL* ❱━━━┫
 ┃ • *${prefix}jadwal* <kelas> [hari]
 ┃   _Cek jadwal (hari ini, besok, lusa, semua)._
@@ -480,7 +480,34 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				: "";
 
 			const rawInput = text.trim();
-			if (!rawInput && !quotedText) {
+			// Ekstrak gambar (lampiran perintah atau balasan ke gambar/stiker)
+			let iqcImageBuffer = null;
+			let iqcImageMime = null;
+			try {
+				if (messageType === "imageMessage" && msg?.imageMessage?.mediaKey) {
+					const buf = await downloadMediaBuffer(msg.imageMessage, "image");
+					if (buf.length > 0) {
+						iqcImageBuffer = buf;
+						iqcImageMime = msg.imageMessage.mimetype;
+					}
+				} else if (quotedType === "imageMessage" && quotedMsg?.imageMessage?.mediaKey) {
+					const buf = await downloadMediaBuffer(quotedMsg.imageMessage, "image");
+					if (buf.length > 0) {
+						iqcImageBuffer = buf;
+						iqcImageMime = quotedMsg.imageMessage.mimetype;
+					}
+				} else if (quotedType === "stickerMessage" && quotedMsg?.stickerMessage?.mediaKey) {
+					const webpBuf = await downloadMediaBuffer(quotedMsg.stickerMessage, "sticker");
+					const pngBuf = await webpToImage(webpBuf);
+					if (pngBuf.length > 0) {
+						iqcImageBuffer = pngBuf;
+						iqcImageMime = "image/png";
+					}
+				}
+			} catch (e) {
+				console.warn("[IQC] Gagal memuat gambar:", e.message);
+			}
+			if (!rawInput && !quotedText && !iqcImageBuffer) {
 				return await reply(
 					`⚠️ *Teks Tidak Ditemukan!*\n\nContoh penggunaan:\n` +
 					`• *${prefix}iqc Terkadang aku merasa pantas diabaikan...*\n` +
@@ -542,6 +569,8 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 					text: quoteText,
 					side,
 					avatarBuffer,
+					imageBuffer: iqcImageBuffer,
+					imageMime: iqcImageMime,
 				});
 
 				await sock.sendMessage(from, { image: iqcPng }, { quoted: m });
