@@ -52,8 +52,8 @@ module.exports = {
   // Konfigurasi tanda baca (centang biru) untuk pesan masuk
   readReceipt: {
     enabled: true,
-    allMessages: true, // true: semua pesan masuk langsung ditandai dibaca (termasuk obrolan grup)
-    groups: true, // tandai pesan yang masuk di grup
+    allMessages: false, // true: semua pesan masuk ditandai dibaca | false: hanya chat privat atau mention/reply/command di grup
+    groups: true, // tandai pesan yang masuk di grup (hanya saat di-mention/direply atau command jika allMessages: false)
     privateChat: true // tandai pesan yang masuk di chat pribadi
   },
 

@@ -218,9 +218,6 @@ async function handleMessage(sock, m) {
 		const limitUserId = String(pnIdentity || sender || from).split(":")[0].replace(/[^0-9]/g, "");
 		const limitEnabled = config.chatLimit?.enabled !== false;
 
-		// Simpan identitas user (nama, jumlah pesan, terakhir aktif) ke SQLite
-		touchUser(limitUserId, pushName);
-
 		// Ekstraksi pesan aktual (antisipasi ephemeral & viewOnce wrapper)
 		let msg = unwrapMessage(m.message);
 		if (!msg) return;
@@ -230,8 +227,62 @@ async function handleMessage(sock, m) {
 		// Ekstraksi teks isi pesan
 		const body = extractMessageText(msg, messageType);
 		const trimmedBody = body.trim();
+		const displayBody = cleanDisplayBody(trimmedBody);
 		const prefix = config.botPrefix;
 		const isCommand = trimmedBody.startsWith(prefix);
+
+		// Deteksi konteks pesan kutipan (reply/quote) & mention
+		const contextInfo = msg[messageType]?.contextInfo || msg?.contextInfo;
+		const rawQuoted = contextInfo?.quotedMessage;
+		const quotedMsg = rawQuoted ? unwrapMessage(rawQuoted) : null;
+		const quotedType = quotedMsg ? (getContentType(quotedMsg) || Object.keys(quotedMsg)[0]) : null;
+
+		// Deteksi apakah bot di-mention di pesan ini
+		const mentionedJids = (contextInfo?.mentionedJid || []).map((j) => jidNormalizedUser(j));
+		const mentionedNumbers = mentionedJids.map((j) => j.split("@")[0].split(":")[0].replace(/[^0-9]/g, ""));
+		const isMentioned =
+			Boolean(botJid && mentionedJids.includes(botJid)) ||
+			Boolean(botLid && mentionedJids.includes(botLid)) ||
+			Boolean(botNumber && (mentionedNumbers.includes(botNumber) || trimmedBody.includes("@" + botNumber))) ||
+			Boolean(botLidNumber && (mentionedNumbers.includes(botLidNumber) || trimmedBody.includes("@" + botLidNumber))) ||
+			Boolean(config.botName && trimmedBody.toLowerCase().includes("@" + config.botName.toLowerCase()));
+
+		// Deteksi apakah pesan ini membalas (reply) ke pesan bot
+		const quotedParticipant = contextInfo?.participant ? jidNormalizedUser(contextInfo.participant) : null;
+		let quotedPnAlt = null;
+		if (quotedParticipant && quotedParticipant.endsWith("@lid") && sock.signalRepository?.lidMapping?.getPNForLID) {
+			try {
+				quotedPnAlt = await sock.signalRepository.lidMapping.getPNForLID(quotedParticipant);
+			} catch (e) {
+				// Abaikan jika mapping LID belum tersedia
+			}
+		}
+		const quotedParticipantNumber = quotedParticipant
+			? quotedParticipant.split("@")[0].split(":")[0].replace(/[^0-9]/g, "")
+			: null;
+		const quotedPnNumber = quotedPnAlt
+			? quotedPnAlt.split("@")[0].split(":")[0].replace(/[^0-9]/g, "")
+			: null;
+
+		const isReplyingToBot =
+			Boolean(botJid && quotedParticipant === botJid) ||
+			Boolean(botLid && quotedParticipant === botLid) ||
+			Boolean(botNumber && quotedParticipantNumber === botNumber) ||
+			Boolean(botLidNumber && quotedParticipantNumber === botLidNumber) ||
+			Boolean(botNumber && quotedPnNumber === botNumber) ||
+			contextInfo?.fromMe === true ||
+			contextInfo?.quotedMessage?.fromMe === true;
+
+		// Apakah pesan ini ditujukan langsung untuk bot?
+		// - Di chat privat: semua pesan ditujukan ke bot.
+		// - Di grup: HANYA jika berupa command, bot di-mention, atau membalas pesan bot.
+		const isTargetedForBot = !isGroup || isCommand || isMentioned || isReplyingToBot;
+
+		// Simpan identitas user (nama, jumlah pesan, terakhir aktif) ke SQLite
+		// Hanya catat user jika berinteraksi langsung dengan bot
+		if (isTargetedForBot) {
+			touchUser(limitUserId, pushName);
+		}
 
 		// Tandai pesan sudah dibaca (centang biru) sekali saja per pesan, hanya saat bot menanggapi
 		let hasMarkedRead = false;
@@ -246,37 +297,37 @@ async function handleMessage(sock, m) {
 			}
 		};
 
-		// Otomatis tandai dibaca untuk SEMUA pesan masuk (termasuk obrolan grup yang tidak dibalas)
+		// Otomatis tandai dibaca:
+		// - Di chat privat: selalu tandai dibaca (jika privateChat aktif)
+		// - Di grup: HANYA tandai dibaca bila pesan ditujukan ke bot (mention / reply bot / command)
 		const readCfg = config.readReceipt || {};
 		const nonChatTypes = new Set(["protocolMessage", "senderKeyDistributionMessage", "messageContextInfo", "reactionMessage"]);
 		const autoReadEnabled =
 			readCfg.enabled !== false &&
-			readCfg.allMessages !== false &&
-			(isGroup ? readCfg.groups !== false : readCfg.privateChat !== false) &&
-			!nonChatTypes.has(messageType);
+			!nonChatTypes.has(messageType) &&
+			(readCfg.allMessages
+				? (isGroup ? readCfg.groups !== false : readCfg.privateChat !== false)
+				: (isGroup ? (readCfg.groups !== false && isTargetedForBot) : readCfg.privateChat !== false));
+
 		if (autoReadEnabled) {
 			await markAsRead();
 		}
 
+		// Logging pesan masuk & command di terminal:
+		// HANYA tampilkan log jika di chat privat ATAU di-mention / di-reply di grup / command
+		if (isTargetedForBot) {
+			const time = `${color.dim}[${getTimestamp()}]${color.reset}`;
+			const chatLabel = await getChatLabel(sock, from, isGroup);
+			const displayPreview = (displayBody.length > 60 ? displayBody.slice(0, 60) + "…" : displayBody).replace(/\n/g, `\n${color.yellow}`);
+			const userTag = `${color.bold}[${pushName}]${color.reset}`;
 
-		// Logging pesan masuk & command (berwarna, bersih tanpa ID WA, jam & tanggal)
-		const time = `${color.dim}[${getTimestamp()}]${color.reset}`;
-		const chatLabel = await getChatLabel(sock, from, isGroup);
-		const displayBody = cleanDisplayBody(trimmedBody);
-		const displayPreview = (displayBody.length > 60 ? displayBody.slice(0, 60) + "…" : displayBody).replace(/\n/g, `\n${color.yellow}`);
-		const userTag = `${color.bold}[${pushName}]${color.reset}`;
-
-		if (isCommand) {
-			console.log(`${time} ${color.green}${color.bold}[CMD]${color.reset} ${chatLabel} ${userTag}: ${color.green}${displayBody}${color.reset}`);
-		} else if (trimmedBody) {
-			console.log(`${time} ${color.yellow}[MSG]${color.reset} ${chatLabel} ${userTag}: "${displayPreview}"`);
+			if (isCommand) {
+				console.log(`${time} ${color.green}${color.bold}[CMD]${color.reset} ${chatLabel} ${userTag}: ${color.green}${displayBody}${color.reset}`);
+			} else if (trimmedBody) {
+				console.log(`${time} ${color.yellow}[MSG]${color.reset} ${chatLabel} ${userTag}: "${displayPreview}"`);
+			}
 		}
 
-		// Deteksi konteks pesan kutipan (reply/quote)
-		const contextInfo = msg[messageType]?.contextInfo;
-		const rawQuoted = contextInfo?.quotedMessage;
-		const quotedMsg = rawQuoted ? unwrapMessage(rawQuoted) : null;
-		const quotedType = quotedMsg ? (getContentType(quotedMsg) || Object.keys(quotedMsg)[0]) : null;
 		// Helper untuk membalas pesan dengan quote otomatis
 		const reply = async (text) => {
 			await markAsRead();
@@ -338,22 +389,10 @@ async function handleMessage(sock, m) {
 			});
 			return;
 		}
+
 		// =========================================================================
 		// 1.5. AI BALASAN SERTAMAN (MENTION / BALAS KE PESAN BOT)
 		// =========================================================================
-		const mentionedJids = (contextInfo?.mentionedJid || []).map((j) => jidNormalizedUser(j));
-		const isMentioned =
-			Boolean(botJid && mentionedJids.includes(botJid)) ||
-			Boolean(botLid && mentionedJids.includes(botLid)) ||
-			Boolean(botNumber && trimmedBody.includes("@" + botNumber)) ||
-			Boolean(config.botName && trimmedBody.toLowerCase().includes("@" + config.botName.toLowerCase()));
-
-		const quotedParticipant = contextInfo?.participant ? jidNormalizedUser(contextInfo.participant) : null;
-		const isReplyingToBot =
-			Boolean(botJid && quotedParticipant === botJid) ||
-			Boolean(botLid && quotedParticipant === botLid) ||
-			contextInfo?.quotedMessage?.fromMe === true;
-
 		// AI aktif jika:
 		// 1. Di grup: bot di-mention ATAU membalas chat bot
 		// 2. Di chat privat: langsung aktif (selama mentionOnlyInGroup tidak aktif)
