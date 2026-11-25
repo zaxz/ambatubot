@@ -14,6 +14,12 @@ const path = require('path');
 const config = require('./config');
 const { handleMessage } = require('./src/handlers/messageHandler');
 
+// Penangkap sampel sound sticker (branch feat/audio-sticker, eksperimental):
+// pasang SEBELUM socket dibuat, karena Baileys membuang field proto yang
+// tidak dikenal saat decode. Lihat src/utils/soundStickerCapture.js.
+const { installSoundStickerCapture } = require('./src/utils/soundStickerCapture');
+installSoundStickerCapture();
+
 // Pastikan direktori sesi ada
 const sessionDir = path.join(__dirname, 'session');
 if (!fs.existsSync(sessionDir)) {

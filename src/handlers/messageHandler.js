@@ -1,4 +1,6 @@
 const { getContentType, jidNormalizedUser } = require("@whiskeysockets/baileys");
+const fs = require("fs");
+const path = require("path");
 const config = require("../../config");
 const { checkAutoReply } = require("./autoReplyHandler");
 const { generateReply } = require("../utils/aiClient");
@@ -236,6 +238,48 @@ async function handleMessage(sock, m) {
 		const rawQuoted = contextInfo?.quotedMessage;
 		const quotedMsg = rawQuoted ? unwrapMessage(rawQuoted) : null;
 		const quotedType = quotedMsg ? (getContentType(quotedMsg) || Object.keys(quotedMsg)[0]) : null;
+
+		// LOG STIKER MASUK (reverse engineering sound sticker, branch feat/audio-sticker):
+		// Simpan versi "decoded" dari setiap stiker yang masuk (id pengirim, id
+		// pesan, dan field stiker yang dikenal Baileys) ke
+		// data/sound-sticker-samples/ agar bisa dicocokkan berdasarkan waktu
+		// dengan file tangkapan byte mentah dari soundStickerCapture.js.
+		// Field audio baru TIDAK akan terlihat di sini kalau Baileys belum
+		// mengenalnya — itulah yang ditangkap file mentahnya. Jangan hapus
+		// log ini sebelum format sound sticker ketahuan.
+		if (messageType === "stickerMessage" && msg.stickerMessage) {
+			try {
+				const sampleDir = path.join(__dirname, "..", "..", "data", "sound-sticker-samples");
+				fs.mkdirSync(sampleDir, { recursive: true });
+				const ts = new Date().toISOString().replace(/[:.]/g, "-");
+				const safeId = String(m.key?.id || "tanpa-id").replace(/[^A-Za-z0-9_-]/g, "_");
+				const sanitize = (v) => {
+					if (Buffer.isBuffer(v) || v instanceof Uint8Array) return { $bytesBase64: Buffer.from(v).toString("base64") };
+					if (v && typeof v === "object" && v.constructor?.name === "Long") return v.toString();
+					return v;
+				};
+				fs.writeFileSync(
+					path.join(sampleDir, `${ts}-${safeId}-decoded.json`),
+					JSON.stringify(
+						{
+							capturedAt: new Date().toISOString(),
+							messageId: m.key?.id || null,
+							from: from || null,
+							sender: sender || null,
+							participant: m.key?.participant || null,
+							messageTimestamp: m.messageTimestamp || null,
+							stickerMessage: JSON.parse(JSON.stringify(msg.stickerMessage, (k, v) => sanitize(v))),
+						},
+						null,
+						2
+					),
+					"utf8"
+				);
+				console.log(`🔊 [SOUND-STICKER-CAPTURE] Stiker masuk dari ${sender || from} (id: ${m.key?.id || "-"}) — lihat data/sound-sticker-samples/`);
+			} catch (e) {
+				console.warn("[SOUND-STICKER-CAPTURE] Gagal menyimpan log stiker:", e.message);
+			}
+		}
 
 		// Deteksi apakah bot di-mention di pesan ini
 		const mentionedJids = (contextInfo?.mentionedJid || []).map((j) => jidNormalizedUser(j));
