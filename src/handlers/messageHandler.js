@@ -1,4 +1,4 @@
-const { getContentType, jidNormalizedUser } = require("@whiskeysockets/baileys");
+const { getContentType, jidNormalizedUser, proto } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const path = require("path");
 const config = require("../../config");
@@ -282,6 +282,27 @@ async function handleMessage(sock, m) {
 				console.log(`🔊 [SOUND-STICKER-CAPTURE] Pesan ${messageType} masuk dari ${sender || from} (id: ${m.key?.id || "-"}) — lihat data/sound-sticker-samples/`);
 			} catch (e) {
 				console.warn("[SOUND-STICKER-CAPTURE] Gagal menyimpan log pesan:", e.message);
+			}
+		}
+		// RELAY TEST (sound sticker, branch feat/audio-sticker):
+		// Simpan pesan mentah sound sticker ASLI terakhir yang masuk (beserta
+		// wrapper field 134-nya) sebagai byte protobuf ke data/last-sound-sticker.bin,
+		// supaya perintah .relayss bisa mengirim ulang pesan asli dari HP tanpa
+		// re-upload / tanpa rakit ulang. Kalau stiker hasil relay muncul di HP,
+		// formatnya benar dan masalahnya ada di rakitan bot; kalau tetap tidak
+		// muncul, HP/server tidak merender sound sticker dari pengirim Web.
+		// Disimpan sebagai byte (bukan JSON) supaya round-trip-nya persis.
+		if (unwrapMessage(m.message)?.soundStickerMessage) {
+			try {
+				const storeDir = path.join(__dirname, "..", "..", "data");
+				fs.mkdirSync(storeDir, { recursive: true });
+				fs.writeFileSync(
+					path.join(storeDir, "last-sound-sticker.bin"),
+					Buffer.from(proto.Message.encode(m.message).finish())
+				);
+				console.log(`🔊 [SOUND-STICKER-RELAY] Sound sticker asli tersimpan (id: ${m.key?.id || "-"}) — kirim .relayss untuk mengirim ulangnya.`);
+			} catch (e) {
+				console.warn("[SOUND-STICKER-RELAY] Gagal menyimpan sound sticker asli:", e.message);
 			}
 		}
 

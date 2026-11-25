@@ -1,4 +1,7 @@
 const axios = require("axios");
+const fs = require("fs");
+const path = require("path");
+const { proto } = require("@whiskeysockets/baileys");
 const config = require("../config");
 const {
 	downloadMediaBuffer,
@@ -467,6 +470,45 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				await reply(`❌ Gagal membuat stiker audio: ${err.message}`);
 			}
 			break;
+		}
+
+		// =========================================================================
+		// RELAY SOUND STICKER ASLI (.relayss) — TES, branch feat/audio-sticker
+		// Mengirim ulang sound sticker ASLI terakhir yang dikirim HP ke bot
+		// (tersimpan sebagai byte protobuf di data/last-sound-sticker.bin oleh
+		// messageHandler.js), tanpa re-upload / tanpa rakit ulang. Dipakai untuk
+		// membuktikan apakah format sound sticker dirender HP saat dikirim dari
+		// pengirim Web. Hanya owner. Bukan fitur permanen — hapus setelah tes.
+		// =========================================================================
+		case "relayss": {
+			if (!isOwner) {
+				return await reply(`⚠️ Perintah ini hanya untuk owner.`);
+			}
+			const storePath = path.join(__dirname, "data", "last-sound-sticker.bin");
+			if (!fs.existsSync(storePath)) {
+				return await reply(
+					`⚠️ Belum ada sound sticker asli yang tersimpan.\n\n` +
+						`Kirim dulu sound sticker asli (dari HP, lewat pembuat stiker) ke bot, lalu kirim *${prefix}relayss*.`
+				);
+			}
+			try {
+				const original = proto.Message.decode(fs.readFileSync(storePath));
+				if (!original?.soundStickerMessage) {
+					return await reply(`⚠️ File tersimpan bukan sound sticker (tidak ada field 134). Kirim ulang sound sticker asli ke bot.`);
+				}
+				await sock.relayMessage(from, original, {});
+				await react("✅");
+				return await reply(
+					`🔊 *SOUND STICKER ASLI DIKIRIM ULANG (RELAY)*\n\n` +
+						`Ini pesan asli dari HP yang dikirim ulang apa adanya (tanpa rakit ulang, tanpa upload ulang).\n\n` +
+						`• Kalau stikernya *muncul* di chat ini → format sound sticker benar, masalahnya ada di rakitan bot.\n` +
+						`• Kalau tetap *tidak muncul* → HP/server tidak merender sound sticker dari pengirim Web.`
+				);
+			} catch (err) {
+				console.error("Error saat relay sound sticker:", err);
+				await react("❌");
+				return await reply(`❌ Gagal relay sound sticker: ${err.message}`);
+			}
 		}
 
 		// =========================================================================
