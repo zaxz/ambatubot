@@ -239,15 +239,18 @@ async function handleMessage(sock, m) {
 		const quotedMsg = rawQuoted ? unwrapMessage(rawQuoted) : null;
 		const quotedType = quotedMsg ? (getContentType(quotedMsg) || Object.keys(quotedMsg)[0]) : null;
 
-		// LOG STIKER MASUK (reverse engineering sound sticker, branch feat/audio-sticker):
-		// Simpan versi "decoded" dari setiap stiker yang masuk (id pengirim, id
-		// pesan, dan field stiker yang dikenal Baileys) ke
+		// LOG PESAN NON-TEKS MASUK (reverse engineering sound sticker, branch feat/audio-sticker):
+		// Simpan versi "decoded" dari setiap pesan non-teks yang masuk (id
+		// pengirim, id pesan, dan field yang dikenal Baileys) ke
 		// data/sound-sticker-samples/ agar bisa dicocokkan berdasarkan waktu
 		// dengan file tangkapan byte mentah dari soundStickerCapture.js.
-		// Field audio baru TIDAK akan terlihat di sini kalau Baileys belum
-		// mengenalnya — itulah yang ditangkap file mentahnya. Jangan hapus
-		// log ini sebelum format sound sticker ketahuan.
-		if (messageType === "stickerMessage" && msg.stickerMessage) {
+		// Sejak v2: semua tipe non-teks dicatat, bukan cuma stiker — sound
+		// sticker ternyata TIDAK datang sebagai stickerMessage biasa, jadi
+		// bentuk aslinya harus ketahuan dari log ini. Field audio baru TIDAK
+		// akan terlihat di sini kalau Baileys belum mengenalnya — itulah yang
+		// ditangkap file mentahnya. Jangan hapus log ini sebelum format sound
+		// sticker ketahuan.
+		if (messageType && !["conversation", "extendedTextMessage"].includes(messageType) && msg[messageType]) {
 			try {
 				const sampleDir = path.join(__dirname, "..", "..", "data", "sound-sticker-samples");
 				fs.mkdirSync(sampleDir, { recursive: true });
@@ -264,20 +267,21 @@ async function handleMessage(sock, m) {
 						{
 							capturedAt: new Date().toISOString(),
 							messageId: m.key?.id || null,
+							messageType: messageType || null,
 							from: from || null,
 							sender: sender || null,
 							participant: m.key?.participant || null,
 							messageTimestamp: m.messageTimestamp || null,
-							stickerMessage: JSON.parse(JSON.stringify(msg.stickerMessage, (k, v) => sanitize(v))),
+							decodedContent: JSON.parse(JSON.stringify(msg[messageType], (k, v) => sanitize(v))),
 						},
 						null,
 						2
 					),
 					"utf8"
 				);
-				console.log(`🔊 [SOUND-STICKER-CAPTURE] Stiker masuk dari ${sender || from} (id: ${m.key?.id || "-"}) — lihat data/sound-sticker-samples/`);
+				console.log(`🔊 [SOUND-STICKER-CAPTURE] Pesan ${messageType} masuk dari ${sender || from} (id: ${m.key?.id || "-"}) — lihat data/sound-sticker-samples/`);
 			} catch (e) {
-				console.warn("[SOUND-STICKER-CAPTURE] Gagal menyimpan log stiker:", e.message);
+				console.warn("[SOUND-STICKER-CAPTURE] Gagal menyimpan log pesan:", e.message);
 			}
 		}
 

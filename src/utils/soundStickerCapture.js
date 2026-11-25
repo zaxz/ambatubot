@@ -16,11 +16,24 @@ const crypto = require("crypto");
  *
  * Karena itu file ini menambal `proto.Message.decode` SEBELUM socket
  * Baileys dibuat, lalu memindai byte protobuf mentah setiap pesan masuk
- * dengan parser generik (tanpa skema). Kalau ada `stickerMessage`
- * (field 26), semua nomor field di dalamnya dicatat — termasuk field yang
- * belum dikenal Baileys. Hasilnya disimpan ke
- * `data/sound-sticker-samples/` (folder itu di-.gitignore, tidak ikut
- * ter-commit; ambil filenya lewat File Manager panel lalu kirim ke Muse).
+ * dengan parser generik (tanpa skema).
+ *
+ * TEMUAN 2026-11-25 (v2): stiker BIASA ketangkap, tapi sound sticker TIDAK
+ * ketangkap sama sekali — tidak ada file apa pun. Artinya sound sticker
+ * TIDAK datang sebagai `stickerMessage` (field 26 di Message) untuk klien
+ * WhatsApp Web seperti bot ini; ia pasti datang sebagai field Message lain
+ * (mis. `lottieStickerMessage` = 74 atau field baru), terbungkus pesan lain,
+ * atau memang tidak dikirim server ke klien Web. Karena itu sejak v2
+ * penangkap ini mencatat NOMOR FIELD TOP-LEVEL setiap pesan masuk ke
+ * `message-types.log`, dan menyimpan scan penuh untuk pesan apa pun yang
+ * BUKAN teks biasa dan BUKAN stiker biasa — apa pun bentuk sound sticker
+ * itu, ia akan ketangkap. Kalau setelah ini pun tidak ada jejak saat sound
+ * sticker dikirim, kesimpulannya: server WhatsApp belum mengirim sound
+ * sticker ke klien Web, dan penangkapan harus lewat jalur lain.
+ *
+ * Hasil disimpan ke `data/sound-sticker-samples/` (folder itu di-.gitignore,
+ * tidak ikut ter-commit; ambil filenya lewat File Manager panel lalu kirim
+ * ke Muse).
  *
  * Keamanan: penangkap ini TIDAK PERNAH boleh merusak penerimaan pesan.
  * Semua pemindaian dibungkus try/catch; kalau pemindaian gagal, decode
@@ -54,9 +67,9 @@ function readVarint(buf, pos) {
 // Coba parse bytes sebagai sub-message; kembalikan null kalau bukan message
 // (misalnya hash acak 32 byte). Syarat: parse harus menghabiskan seluruh
 // buffer dan semua nomor field masuk akal (< 100).
-function tryParseSubmessage(bytes) {
+function tryParseSubmessage(bytes, inSticker) {
 	try {
-		const fields = parseFields(bytes, false);
+		const fields = parseFields(bytes, false, inSticker);
 		if (!fields.length) return null;
 		if (fields.some((f) => f.field <= 0 || f.field > 100)) return null;
 		return fields;
@@ -65,7 +78,10 @@ function tryParseSubmessage(bytes) {
 	}
 }
 
-function parseFields(buf, recurseIntoSticker) {
+// isTopLevel: sedang mem-parse Message itu sendiri.
+// inSticker: sedang mem-parse isi stickerMessage (field 26) — di dalamnya
+// hanya field yang belum dikenal yang diurai lebih dalam dan disimpan mentah.
+function parseFields(buf, isTopLevel, inSticker) {
 	const fields = [];
 	let pos = 0;
 	while (pos < buf.length) {
@@ -100,18 +116,23 @@ function parseFields(buf, recurseIntoSticker) {
 			entry.previewHex = bytes.subarray(0, 64).toString("hex");
 			const asText = bytes.toString("utf8");
 			if (/^[\x20-\x7e]{4,}$/.test(asText)) entry.previewText = asText.slice(0, 120);
-			// Rekursi hanya ke arah yang relevan: dari Message ke stickerMessage
-			// (field 26 di Message, WAProto.proto:2088), dan di dalam sticker
-			// ke field yang belum dikenal.
+			// Di top-level, urai semua sub-message (stiker, gambar, dan apa
+			// pun yang baru) agar struktur sound sticker terlihat apa pun
+			// field-nya. Di dalam stiker, hanya field tak dikenal yang
+			// diurai dan disimpan mentah.
 			const shouldRecurse =
-				(recurseIntoSticker && fieldNo === 26) ||
-				(!recurseIntoSticker && !KNOWN_STICKER_FIELDS.has(fieldNo));
+				isTopLevel ||
+				(inSticker && !KNOWN_STICKER_FIELDS.has(fieldNo)) ||
+				(!isTopLevel && !inSticker);
 			if (shouldRecurse) {
-				const children = tryParseSubmessage(bytes);
+				const children = tryParseSubmessage(bytes, isTopLevel ? fieldNo === 26 : inSticker);
 				if (children) entry.children = children;
-				// Simpan bytes mentah field tak dikenal secara utuh (isinya
-				// metadata kecil: mediaKey/directPath/durasi — bukan file audio).
-				if (!recurseIntoSticker) entry.rawBase64 = bytes.toString("base64");
+				// Simpan bytes mentah field tak dikenal di dalam stiker secara
+				// utuh (isinya metadata kecil: mediaKey/directPath/durasi —
+				// bukan file audio).
+				if (inSticker && !KNOWN_STICKER_FIELDS.has(fieldNo)) {
+					entry.rawBase64 = bytes.toString("base64");
+				}
 			}
 			fields.push(entry);
 		} else {
@@ -122,17 +143,18 @@ function parseFields(buf, recurseIntoSticker) {
 	return fields;
 }
 
-// Pindai byte Message mentah: kembalikan daftar field top-level, field
-// stickerMessage, dan field stiker yang belum dikenal Baileys.
+// Pindai byte Message mentah: kembalikan daftar field top-level, seluruh
+// field top-level yang terurai, field stickerMessage, dan field stiker yang
+// belum dikenal Baileys.
 function scanMessageBytes(buffer) {
 	const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
-	const top = parseFields(buf, true);
+	const top = parseFields(buf, true, false);
 	const sticker = top.find((f) => f.field === 26);
 	const stickerFields = sticker?.children || null;
 	const unknownStickerFields = stickerFields
 		? stickerFields.filter((f) => !KNOWN_STICKER_FIELDS.has(f.field))
 		: [];
-	return { topLevelFields: top.map((f) => f.field), stickerFields, unknownStickerFields };
+	return { topLevelFields: top.map((f) => f.field), topFields: top, stickerFields, unknownStickerFields };
 }
 
 function sanitizeForJson(value) {
@@ -145,35 +167,53 @@ function sanitizeForJson(value) {
 	return value;
 }
 
-function saveSample(scan, decodedSticker) {
+// Satu baris JSON per pesan masuk: jam + nomor field top-level-nya saja.
+// File ini yang membuktikan sound sticker datang sebagai tipe apa (atau
+// tidak datang sama sekali) meskipun scan penuhnya tidak tersimpan.
+function appendTypeLog(scan) {
 	try {
 		fs.mkdirSync(SAMPLE_DIR, { recursive: true });
-		const stickerHash = crypto
-			.createHash("sha256")
-			.update(JSON.stringify(scan.stickerFields || []))
-			.digest("hex")
-			.slice(0, 12);
-		const existing = fs.readdirSync(SAMPLE_DIR).find((f) => f.endsWith(`-${stickerHash}.json`));
-		if (existing) return path.join(SAMPLE_DIR, existing); // sampel yang sama sudah tersimpan
+		fs.appendFileSync(
+			path.join(SAMPLE_DIR, "message-types.log"),
+			JSON.stringify({ ts: new Date().toISOString(), fields: scan.topLevelFields }) + "\n",
+			"utf8"
+		);
+	} catch {
+		// Log tipe pesan tidak boleh mengganggu apa pun.
+	}
+}
+
+function saveSample(scan, decodedSticker, contentHash) {
+	try {
+		fs.mkdirSync(SAMPLE_DIR, { recursive: true });
+		const existing = fs.readdirSync(SAMPLE_DIR).find((f) => f.endsWith(`-${contentHash}.json`));
+		if (existing) return path.join(SAMPLE_DIR, existing); // pesan yang sama sudah tersimpan
 		const ts = new Date().toISOString().replace(/[:.]/g, "-");
-		const file = path.join(SAMPLE_DIR, `${ts}-${stickerHash}.json`);
+		const file = path.join(SAMPLE_DIR, `${ts}-${contentHash}.json`);
 		const payload = {
 			capturedAt: new Date().toISOString(),
-			note: "Sampel stiker mentah (metadata proto saja, bukan file gambar/audio). Field stiker yang tidak dikenal Baileys = kandidat field audio sound sticker.",
+			note: "Sampel pesan mentah (metadata proto saja, bukan file gambar/audio). Field stiker yang tidak dikenal Baileys = kandidat field audio sound sticker. Kalau pesan ini bukan stiker biasa, lihat topFields: itulah bentuk asli pesan yang dikirim.",
 			unknownStickerFields: scan.unknownStickerFields,
 			topLevelFields: scan.topLevelFields,
+			topFields: scan.topFields,
 			stickerFields: scan.stickerFields,
 			decodedStickerKnownFields: decodedSticker
 				? JSON.parse(JSON.stringify(decodedSticker, (k, v) => sanitizeForJson(v)))
 				: null,
 		};
 		fs.writeFileSync(file, JSON.stringify(payload, null, 2), "utf8");
-		console.log(
-			`🔊 [SOUND-STICKER-CAPTURE] Stiker masuk tersimpan: ${file} | field tak dikenal: ` +
-				(scan.unknownStickerFields.length
-					? scan.unknownStickerFields.map((f) => f.field).join(", ")
-					: "tidak ada (stiker biasa / field audio terbuang di tempat lain)")
-		);
+		if (scan.stickerFields) {
+			console.log(
+				`🔊 [SOUND-STICKER-CAPTURE] Stiker masuk tersimpan: ${file} | field tak dikenal: ` +
+					(scan.unknownStickerFields.length
+						? scan.unknownStickerFields.map((f) => f.field).join(", ")
+						: "tidak ada (stiker biasa)")
+			);
+		} else {
+			console.log(
+				`🔊 [SOUND-STICKER-CAPTURE] Pesan non-teks masuk tersimpan: ${file} | field top-level: ${scan.topLevelFields.join(", ")}`
+			);
+		}
 		return file;
 	} catch (err) {
 		console.warn("[SOUND-STICKER-CAPTURE] Gagal menyimpan sampel:", err.message);
@@ -203,13 +243,27 @@ function installSoundStickerCapture() {
 	proto.Message.decode = function (input, ...rest) {
 		const decoded = originalDecode(input, ...rest);
 		try {
-			let bytes = null;
-			if (input instanceof Uint8Array) bytes = Buffer.from(input);
-			else if (input && input.buf instanceof Uint8Array) bytes = Buffer.from(input.buf);
-			if (!bytes || !bytes.length) return decoded;
+			// Hanya pindai kalau input berupa byte utuh (Uint8Array). Decode
+			// BERSARANG dari dalam Baileys (mis. isi FutureProofMessage)
+			// menerima Reader yang menunjuk ke tengah buffer induk — byte
+			// yang terbaca dari situ bukan pesan utuh, jadi jangan dipindai.
+			// Pesan terluar selalu datang sebagai Uint8Array (lihat
+			// decode-wa-message.js:266), dan parser di atas sudah mengurai
+			// sub-message di dalamnya, jadi tidak ada yang hilang.
+			if (!(input instanceof Uint8Array)) return decoded;
+			const bytes = Buffer.from(input);
+			if (!bytes.length) return decoded;
 			const scan = scanMessageBytes(bytes);
+			appendTypeLog(scan);
+			const contentHash = crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 12);
+			const isPlainText = scan.topLevelFields.length === 1 && scan.topLevelFields[0] === 1;
 			if (scan.stickerFields) {
-				saveSample(scan, decoded?.stickerMessage || null);
+				saveSample(scan, decoded?.stickerMessage || null, contentHash);
+			} else if (!isPlainText) {
+				// Bukan teks biasa dan bukan stiker: simpan scan penuh apa pun
+				// bentuknya. Ini yang menangkap sound sticker kalau ternyata
+				// datang sebagai field Message lain atau terbungkus pesan lain.
+				saveSample(scan, null, contentHash);
 			}
 		} catch {
 			// Jangan pernah merusak penerimaan pesan karena penangkap.
@@ -217,7 +271,7 @@ function installSoundStickerCapture() {
 		return decoded;
 	};
 	console.log(
-		"🔊 [SOUND-STICKER-CAPTURE] Aktif. Kirim sound sticker ASLI dari WhatsApp beta ke bot, " +
+		"🔊 [SOUND-STICKER-CAPTURE] Aktif (v2: mencatat semua tipe pesan). Kirim sound sticker ASLI dari WhatsApp beta ke bot, " +
 			"lalu ambil file hasil tangkapan di data/sound-sticker-samples/."
 	);
 	return true;
