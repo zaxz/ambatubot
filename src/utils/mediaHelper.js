@@ -231,25 +231,27 @@ async function sendAudioSticker(sock, from, quotedMsg, { stickerBuffer, audioBuf
  * Baileys `zaxz/Baileys` branch `feat/sound-sticker`
  * (`prepareSoundStickerMessageContent` di Baileys). Bot harus memakai fork itu —
  * Baileys dari npm tidak mengenal content `soundSticker` dan akan error.
+ *
+ * Sengaja dikirim TANPA quote: sound sticker asli dari klien resmi tidak
+ * pernah berupa balasan, dan sampel asli yang ditangkap punya contextInfo
+ * stiker persis [74] (mediaKeyInfo saja). Mengirimnya sebagai balasan
+ * menambah field quote ke contextInfo stiker, dan di pengujian pertama
+ * stikernya tidak tampil di HP — jadi kirim apa adanya seperti sampel.
  * @returns {Promise<*>} hasil `sock.sendMessage` (WebMessageInfo)
  */
-async function sendNativeSoundSticker(sock, from, quotedMsg, { stickerBuffer, audioBuffer, audioSeconds, isAnimated }) {
+async function sendNativeSoundSticker(sock, from, { stickerBuffer, audioBuffer, audioSeconds, isAnimated }) {
 	if (!sock || typeof sock.sendMessage !== "function") throw new Error("Socket WhatsApp tidak tersedia.");
 	if (!stickerBuffer?.length) throw new Error("Buffer stiker kosong.");
 	if (!audioBuffer?.length) throw new Error("Buffer audio kosong.");
 
 	// imageToWebp/videoToWebp selalu menghasilkan 512x512
-	return await sock.sendMessage(
-		from,
-		{
-			soundSticker: { sticker: stickerBuffer, audio: audioBuffer },
-			seconds: audioSeconds ?? undefined,
-			isAnimated: !!isAnimated,
-			width: 512,
-			height: 512,
-		},
-		{ quoted: quotedMsg }
-	);
+	return await sock.sendMessage(from, {
+		soundSticker: { sticker: stickerBuffer, audio: audioBuffer },
+		seconds: audioSeconds ?? undefined,
+		isAnimated: !!isAnimated,
+		width: 512,
+		height: 512,
+	});
 }
 
 /**
@@ -258,7 +260,7 @@ async function sendNativeSoundSticker(sock, from, quotedMsg, { stickerBuffer, au
  */
 async function sendSoundSticker(sock, from, quotedMsg, opts) {
 	try {
-		await sendNativeSoundSticker(sock, from, quotedMsg, opts);
+		await sendNativeSoundSticker(sock, from, opts);
 		return { mode: "native", sentSticker: true, sentAudio: true, audioSeconds: opts.audioSeconds ?? null };
 	} catch (nativeErr) {
 		console.error("[saudio] kirim native gagal, fallback ke stiker + audio:", nativeErr?.message || nativeErr);
