@@ -8,6 +8,7 @@ const {
 	addExif,
 	extractAudioOpus,
 	sendAudioSticker,
+	sendSoundSticker,
 	createMemeSticker,
 	createBratSticker,
 	createBratVideoSticker,
@@ -300,7 +301,7 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 		}
 
 		// =========================================================================
-		// STIKER AUDIO / SOUND STICKER (.saudio) — EKSPERIMENTAL, branch feat/audio-sticker
+		// STIKER AUDIO / SOUND STICKER (.saudio) — NATIVE via fork Baileys, branch feat/audio-sticker
 		// Cara pakai:
 		//  1. Kirim video bersuara dengan caption .saudio (audio asli video dipakai)
 		//  2. Reply video bersuara dengan .saudio
@@ -308,6 +309,9 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 		//     (gambar jadi stiker, audio jadi suaranya — maks. 10 detik)
 		// Batas mengikuti sound sticker resmi WhatsApp (beta Android 2.26.47.1):
 		// stiker statis maks. 10 detik audio, stiker bergerak dari video maks. 5 detik.
+		// Pengiriman memakai `sendSoundSticker()` di src/utils/mediaHelper.js: coba kirim
+		// native dulu (satu pesan, fork Baileys zaxz/Baileys#feat/sound-sticker), kalau
+		// gagal fallback ke stiker + klip audio sebagai dua pesan.
 		// =========================================================================
 		case "saudio":
 		case "stickeraudio":
@@ -435,19 +439,28 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				}
 
 				const trimmed = audioSeconds > audioLimit;
-				const sent = await sendAudioSticker(sock, from, m, {
+				const sent = await sendSoundSticker(sock, from, m, {
 					stickerBuffer,
 					audioBuffer,
 					audioSeconds: Math.min(audioSeconds || audioLimit, audioLimit),
+					isAnimated: visualKind === "video",
 				});
 				await react("✅");
-				await reply(
-					`🔊 *STIKER AUDIO TERKIRIM (EKSPERIMENTAL)*\n\n` +
-						`• Stiker: ${visualKind === "image" ? "gambar" : "video"} → WebP 512x512\n` +
-						`• Audio: ${sent.audioSeconds ?? "?"} detik${trimmed ? ` (dipotong dari ${audioSeconds} detik, batas ${audioLimit} detik)` : ""}\n\n` +
-						`⚠️ _Versi testing:_ Baileys v7 belum mendukung format sound sticker native WhatsApp, jadi bot mengirim stiker + klip audio sebagai pasangan (bukan satu stiker bersuara). ` +
-						`Kalau nanti Baileys menambah dukungannya, cukup ganti isi \`sendAudioSticker()\` di \`src/utils/mediaHelper.js\`.`
-				);
+				if (sent.mode === "native") {
+					await reply(
+						`🔊 *STIKER AUDIO TERKIRIM (NATIVE)*\n\n` +
+							`• Stiker: ${visualKind === "image" ? "gambar" : "video"} → WebP 512x512\n` +
+							`• Audio: ${sent.audioSeconds ?? "?"} detik${trimmed ? ` (dipotong dari ${audioSeconds} detik, batas ${audioLimit} detik)` : ""}\n\n` +
+							`Ini satu stiker bersuara asli (fork Baileys \`zaxz/Baileys#feat/sound-sticker\`). Cek di HP: stikernya harus ada ikon speaker, ketuk untuk memutar suara.`
+					);
+				} else {
+					await reply(
+						`🔊 *STIKER AUDIO TERKIRIM (FALLBACK)*\n\n` +
+							`• Stiker: ${visualKind === "image" ? "gambar" : "video"} → WebP 512x512\n` +
+							`• Audio: ${sent.audioSeconds ?? "?"} detik${trimmed ? ` (dipotong dari ${audioSeconds} detik, batas ${audioLimit} detik)` : ""}\n\n` +
+							`⚠️ _Kirim native gagal, bot mengirim stiker + klip audio sebagai pasangan._ Cek log bot untuk alasannya.`
+					);
+				}
 			} catch (err) {
 				console.error("Error saat membuat stiker audio:", err);
 				await react("❌");

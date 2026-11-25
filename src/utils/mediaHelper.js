@@ -193,21 +193,14 @@ async function extractAudioOpus(inputBuffer, maxDurationSeconds = 10, inputExt =
 }
 
 /**
- * Kirim stiker audio (sound sticker) — VERSI EKSPERIMENTAL / TESTING.
+ * Kirim stiker audio (sound sticker) — FALLBACK DUA PESAN.
  *
- * KENAPA DUA PESAN, BUKAN SATU STIKER BERSUARA?
- * Sound sticker resmi WhatsApp (beta Android 2.26.47.1) adalah format baru:
- * stiker + trek audio terpisah di dalam satu pesan, diketuk untuk memutar
- * suara. Format proto itu belum didokumentasikan dan belum diekspos oleh
- * @whiskeysockets/baileys v7 yang dipakai bot ini — tidak ada field
- * `stickerMessage` untuk audio di Baileys, dan WebP sendiri tidak bisa
- * menyimpan audio (flag `-an` di videoToWebp memang membuang audio).
- * Jadi untuk testing, bot mengirim pasangan yang setara secara fungsi:
+ * Dipakai kalau pengiriman native (sendNativeSoundSticker) gagal: bot mengirim
+ * pasangan yang setara secara fungsi:
  *  1. stiker WebP (statis/animasi, dengan EXIF pack seperti biasa), lalu
  *  2. klip audio Opus dari sumber yang sama, tepat setelah stiker.
- * Kalau Baileys nanti menambah dukungan sound sticker native, cukup ganti
- * isi fungsi ini menjadi satu kali `sendMessage` dengan field barunya —
- * semua pemanggil (case `.saudio`) tidak perlu diubah.
+ * WebP sendiri tidak bisa menyimpan audio (flag `-an` di videoToWebp memang
+ * membuang audio), jadi fallback ini tidak pernah jadi satu stiker bersuara.
  * @returns {Promise<{sentSticker: boolean, sentAudio: boolean, audioSeconds: number|null}>}
  */
 async function sendAudioSticker(sock, from, quotedMsg, { stickerBuffer, audioBuffer, audioSeconds }) {
@@ -227,6 +220,51 @@ async function sendAudioSticker(sock, from, quotedMsg, { stickerBuffer, audioBuf
 	}
 
 	return { sentSticker: true, sentAudio, audioSeconds: audioSeconds ?? null };
+}
+
+/**
+ * Kirim sound sticker NATIVE (satu pesan: stiker + trek audio).
+ *
+ * Memakai format sound sticker hasil reverse engineering dari sampel asli
+ * WhatsApp beta Android 2.26.47.1 (Message field 134, StickerMessage field 26
+ * berisi AudioMessage, ContextInfo field 74), yang sudah dipatch ke fork
+ * Baileys `zaxz/Baileys` branch `feat/sound-sticker`
+ * (`prepareSoundStickerMessageContent` di Baileys). Bot harus memakai fork itu —
+ * Baileys dari npm tidak mengenal content `soundSticker` dan akan error.
+ * @returns {Promise<*>} hasil `sock.sendMessage` (WebMessageInfo)
+ */
+async function sendNativeSoundSticker(sock, from, quotedMsg, { stickerBuffer, audioBuffer, audioSeconds, isAnimated }) {
+	if (!sock || typeof sock.sendMessage !== "function") throw new Error("Socket WhatsApp tidak tersedia.");
+	if (!stickerBuffer?.length) throw new Error("Buffer stiker kosong.");
+	if (!audioBuffer?.length) throw new Error("Buffer audio kosong.");
+
+	// imageToWebp/videoToWebp selalu menghasilkan 512x512
+	return await sock.sendMessage(
+		from,
+		{
+			soundSticker: { sticker: stickerBuffer, audio: audioBuffer },
+			seconds: audioSeconds ?? undefined,
+			isAnimated: !!isAnimated,
+			width: 512,
+			height: 512,
+		},
+		{ quoted: quotedMsg }
+	);
+}
+
+/**
+ * Kirim stiker audio: coba native dulu, fallback ke dua pesan kalau gagal.
+ * @returns {Promise<{mode: 'native'|'fallback', sentSticker: boolean, sentAudio: boolean, audioSeconds: number|null}>}
+ */
+async function sendSoundSticker(sock, from, quotedMsg, opts) {
+	try {
+		await sendNativeSoundSticker(sock, from, quotedMsg, opts);
+		return { mode: "native", sentSticker: true, sentAudio: true, audioSeconds: opts.audioSeconds ?? null };
+	} catch (nativeErr) {
+		console.error("[saudio] kirim native gagal, fallback ke stiker + audio:", nativeErr?.message || nativeErr);
+		const sent = await sendAudioSticker(sock, from, quotedMsg, opts);
+		return { mode: "fallback", ...sent };
+	}
 }
 
 /**
@@ -1205,6 +1243,8 @@ module.exports = {
 	addExif,
 	extractAudioOpus,
 	sendAudioSticker,
+	sendNativeSoundSticker,
+	sendSoundSticker,
 	createMemeSticker,
 	createBratSticker,
 	createBratVideoSticker,
