@@ -147,6 +147,89 @@ async function videoToWebp(inputBuffer, maxDuration = 9) {
 }
 
 /**
+ * Ekstrak trek audio dari video/audio menjadi Opus (OGG) — format audio
+ * WhatsApp (mono, 48 kHz). Dipakai untuk stiker audio: WebP sendiri tidak
+ * bisa menyimpan audio, jadi suara disimpan terpisah sebagai klip Opus.
+ * @param {Buffer} inputBuffer - Buffer video (mp4/mov/webm) atau audio (mp3/ogg/m4a/wav)
+ * @param {number} maxDurationSeconds - Potong audio sampai durasi ini (detik)
+ * @param {string} inputExt - Ekstensi sumber untuk FFmpeg (default 'mp4')
+ * @returns {Promise<Buffer>} Buffer audio OGG Opus
+ */
+async function extractAudioOpus(inputBuffer, maxDurationSeconds = 10, inputExt = "mp4") {
+	const safeExt = String(inputExt || "mp4").replace(/[^a-z0-9]/gi, "").toLowerCase() || "mp4";
+	const tmpDir = os.tmpdir();
+	const tag = `${Date.now()}_${Math.random().toString(36).substring(7)}`;
+	const inputPath = path.join(tmpDir, `aud_in_${tag}.${safeExt}`);
+	const outputPath = path.join(tmpDir, `aud_out_${tag}.ogg`);
+
+	try {
+		await fs.promises.writeFile(inputPath, inputBuffer);
+
+		await runFfmpeg([
+			"-y",
+			"-i",
+			inputPath,
+			"-vn", // buang trek video, ambil audionya saja
+			"-c:a",
+			"libopus",
+			"-b:a",
+			"64k",
+			"-ac",
+			"1",
+			"-ar",
+			"48000",
+			"-t",
+			String(Math.max(1, Math.min(maxDurationSeconds || 10, 10))),
+			outputPath,
+		]);
+
+		const result = await fs.promises.readFile(outputPath);
+		if (!result.length) throw new Error("FFmpeg tidak menghasilkan audio (mungkin sumber tidak punya trek audio).");
+		return result;
+	} finally {
+		if (fs.existsSync(inputPath)) await fs.promises.unlink(inputPath).catch(() => {});
+		if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath).catch(() => {});
+	}
+}
+
+/**
+ * Kirim stiker audio (sound sticker) — VERSI EKSPERIMENTAL / TESTING.
+ *
+ * KENAPA DUA PESAN, BUKAN SATU STIKER BERSUARA?
+ * Sound sticker resmi WhatsApp (beta Android 2.26.47.1) adalah format baru:
+ * stiker + trek audio terpisah di dalam satu pesan, diketuk untuk memutar
+ * suara. Format proto itu belum didokumentasikan dan belum diekspos oleh
+ * @whiskeysockets/baileys v7 yang dipakai bot ini — tidak ada field
+ * `stickerMessage` untuk audio di Baileys, dan WebP sendiri tidak bisa
+ * menyimpan audio (flag `-an` di videoToWebp memang membuang audio).
+ * Jadi untuk testing, bot mengirim pasangan yang setara secara fungsi:
+ *  1. stiker WebP (statis/animasi, dengan EXIF pack seperti biasa), lalu
+ *  2. klip audio Opus dari sumber yang sama, tepat setelah stiker.
+ * Kalau Baileys nanti menambah dukungan sound sticker native, cukup ganti
+ * isi fungsi ini menjadi satu kali `sendMessage` dengan field barunya —
+ * semua pemanggil (case `.saudio`) tidak perlu diubah.
+ * @returns {Promise<{sentSticker: boolean, sentAudio: boolean, audioSeconds: number|null}>}
+ */
+async function sendAudioSticker(sock, from, quotedMsg, { stickerBuffer, audioBuffer, audioSeconds }) {
+	if (!sock || typeof sock.sendMessage !== "function") throw new Error("Socket WhatsApp tidak tersedia.");
+	if (!stickerBuffer?.length) throw new Error("Buffer stiker kosong.");
+
+	await sock.sendMessage(from, { sticker: stickerBuffer }, { quoted: quotedMsg });
+
+	let sentAudio = false;
+	if (audioBuffer?.length) {
+		await sock.sendMessage(
+			from,
+			{ audio: audioBuffer, mimetype: "audio/ogg; codecs=opus", ptt: false },
+			{ quoted: quotedMsg }
+		);
+		sentAudio = true;
+	}
+
+	return { sentSticker: true, sentAudio, audioSeconds: audioSeconds ?? null };
+}
+
+/**
  * Konversi stiker WebP kembali ke format gambar PNG
  * @param {Buffer} webpBuffer
  * @returns {Promise<Buffer>}
@@ -1120,6 +1203,8 @@ module.exports = {
 	videoToWebp,
 	webpToImage,
 	addExif,
+	extractAudioOpus,
+	sendAudioSticker,
 	createMemeSticker,
 	createBratSticker,
 	createBratVideoSticker,

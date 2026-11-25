@@ -11,6 +11,9 @@ Bot WhatsApp modern dan handal yang dibangun menggunakan library [@whiskeysocket
 * **Video/GIF ke Stiker Bergerak (Animated Sticker)**: Mengubah video pendek atau GIF (maksimal 9 detik) menjadi stiker animasi WhatsApp.
 * **Custom EXIF Metadata**: Mendukung kustomisasi *Pack Name* (nama paket) dan *Author* (nama pembuat) saat stiker diklik di WhatsApp.
 * **Stiker ke Gambar (`.toimg`)**: Mengubah stiker kembali menjadi file foto/gambar PNG.
+* **Stiker Audio (`.saudio`) — Eksperimental**: Mengubah video bersuara menjadi stiker bergerak + klip audio Opus, atau gambar + voice note/audio menjadi stiker statis + klip audio. Batas audio mengikuti sound sticker resmi WhatsApp: maks. 5 detik untuk video, 10 detik untuk gambar + audio (audio lebih panjang dipotong otomatis).
+
+> ⚠️ **Status testing — baca dulu:** Sound sticker resmi WhatsApp (beta Android 2.26.47.1, November 2026) adalah format baru berupa stiker + trek audio dalam satu pesan. Format proto itu belum didokumentasikan dan belum didukung `@whiskeysockets/baileys` v7 yang dipakai bot ini, dan file WebP sendiri tidak bisa menyimpan audio. Jadi di branch `feat/audio-sticker` ini bot mengirim **pasangan stiker WebP + klip audio Opus** (lihat `sendAudioSticker()` di `src/utils/mediaHelper.js`), bukan satu stiker bersuara native. Kalau Baileys nanti menambah dukungan sound sticker, cukup ganti isi fungsi itu — perintah `.saudio` tidak perlu diubah. Uji di WhatsApp versi terbaru; penerima di versi lama hanya akan melihat stiker biasa + audio terpisah.
 * **iPhone Quoted Chat (`.iqc`)**: Membuat gambar quote chat ala WhatsApp iOS (status bar iPhone, header WA blur, reaksi emoji Apple, dan menu konteks outline).
 
 ### 2. ⚡ Otomatisasi Pesan & Auto-Responder
@@ -96,6 +99,7 @@ npm start
 | :--- | :--- | :--- |
 | `.menu` / `.help` | Menampilkan daftar perintah dan status bot | Kirim `.menu` |
 | `.s` / `.sticker` | Mengubah gambar/video menjadi stiker WhatsApp | Kirim gambar dengan caption `.s` atau reply gambar dengan `.s` |
+| `.saudio` | Membuat stiker bersuara (eksperimental, branch `feat/audio-sticker`) | Kirim video bersuara dengan caption `.saudio`, atau kirim gambar dengan caption `.saudio` sambil reply voice note/audio |
 | `.smeme <atas> \| <bawah>` | Membuat stiker meme dengan teks atas dan bawah | Kirim gambar dengan caption `.smeme KETIKA CODING \| TIBA-TIBA ERROR` |
 | `.brat <teks>` | Membuat stiker teks brat putih: huruf besar rata kanan-kiri, emoji berwarna, efek blur | Kirim `.brat sok iye loe jadi orang 🙏` |
 | `.bratvid <teks>` | Membuat stiker teks brat bergerak kata demi kata (animated WebP) | Kirim `.bratvid sok iye loe jadi orang 🙏` atau reply pesan |

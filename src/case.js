@@ -6,6 +6,8 @@ const {
 	videoToWebp,
 	webpToImage,
 	addExif,
+	extractAudioOpus,
+	sendAudioSticker,
 	createMemeSticker,
 	createBratSticker,
 	createBratVideoSticker,
@@ -111,6 +113,8 @@ async function handleCase(context) {
 ┃   _Bikin stiker teks brat putih (teks besar, emoji berwarna, blur)._
 ┃ • *${prefix}bratvid* <teks>
 ┃   _Bikin stiker teks brat bergerak kata demi kata._
+┃ • *${prefix}saudio*
+┃   _Bikin stiker bersuara (eksperimental): video bersuara, atau gambar + audio._
 ┃ • *${prefix}toimg*
 ┃   _Ubah stiker jadi gambar kembali._
 ┃ • *${prefix}iqc* <teks> / balas gambar
@@ -291,6 +295,163 @@ _Kirim gambar dengan caption *${prefix}s* atau *${prefix}smeme Teks*!_`;
 				console.error("Error saat membuat stiker:", err);
 				await react("❌");
 				await reply(`❌ Gagal membuat stiker: ${err.message}`);
+			}
+			break;
+		}
+
+		// =========================================================================
+		// STIKER AUDIO / SOUND STICKER (.saudio) — EKSPERIMENTAL, branch feat/audio-sticker
+		// Cara pakai:
+		//  1. Kirim video bersuara dengan caption .saudio (audio asli video dipakai)
+		//  2. Reply video bersuara dengan .saudio
+		//  3. Kirim gambar dengan caption .saudio sambil reply voice note/audio
+		//     (gambar jadi stiker, audio jadi suaranya — maks. 10 detik)
+		// Batas mengikuti sound sticker resmi WhatsApp (beta Android 2.26.47.1):
+		// stiker statis maks. 10 detik audio, stiker bergerak dari video maks. 5 detik.
+		// =========================================================================
+		case "saudio":
+		case "stickeraudio":
+		case "audiosticker":
+		case "stikeraudio": {
+			const packname = config.sticker.packName;
+			const author = config.sticker.packAuthor;
+			const maxStaticAudio = config.sticker.maxAudioDurationSeconds || 10;
+			const maxVideoAudio = config.sticker.maxVideoAudioSeconds || 5;
+
+			const isDirectImage = messageType === "imageMessage";
+			const isDirectVideo = messageType === "videoMessage";
+			const isQuotedImage = quotedType === "imageMessage";
+			const isQuotedVideo = quotedType === "videoMessage";
+			const isDirectAudio = messageType === "audioMessage";
+			const isQuotedAudio = quotedType === "audioMessage";
+			const isDirectAudioDoc =
+				messageType === "documentMessage" && String(msg.documentMessage?.mimetype || "").startsWith("audio/");
+			const isQuotedAudioDoc =
+				quotedType === "documentMessage" && String(quotedMsg?.documentMessage?.mimetype || "").startsWith("audio/");
+
+			const hasVisual = isDirectImage || isDirectVideo || isQuotedImage || isQuotedVideo;
+			if (!hasVisual) {
+				return await reply(
+					`⚠️ *Format Tidak Sesuai!*\n\nCara pakai *${prefix}saudio*:\n` +
+						`1. Kirim *video bersuara* dengan caption *${prefix}saudio*\n` +
+						`2. Atau balas (reply) video bersuara dengan *${prefix}saudio*\n` +
+						`3. Atau kirim *gambar* dengan caption *${prefix}saudio* sambil membalas voice note/audio\n\n` +
+						`Batas audio: *${maxVideoAudio} detik* untuk video, *${maxStaticAudio} detik* untuk gambar + audio.`
+				);
+			}
+
+			// Sumber visual: utamakan media langsung, lalu yang di-reply
+			const visualKind = isDirectImage || isQuotedImage ? "image" : "video";
+			const visualMsg = isDirectImage
+				? msg.imageMessage
+				: isQuotedImage
+					? quotedMsg.imageMessage
+					: isDirectVideo
+						? msg.videoMessage
+						: quotedMsg.videoMessage;
+			const visualSeconds = visualMsg?.seconds || 0;
+
+			if (visualKind === "video" && visualSeconds > config.sticker.maxVideoDurationSeconds) {
+				return await reply(
+					`⚠️ Durasi video terlalu panjang! Maksimal adalah *${config.sticker.maxVideoDurationSeconds} detik*.`
+				);
+			}
+
+			// Sumber audio: dari video yang sama, dari audio/voice note, atau dari video yang di-reply
+			let audioKind = null; // 'video' | 'audio' | 'quoted-video'
+			let audioMsg = null;
+			let audioSeconds = 0;
+			let audioLimit = maxStaticAudio;
+			if (visualKind === "video") {
+				audioKind = "video";
+				audioMsg = visualMsg;
+				audioSeconds = visualSeconds;
+				audioLimit = maxVideoAudio;
+			} else if (isDirectAudio || isQuotedAudio || isDirectAudioDoc || isQuotedAudioDoc) {
+				audioKind = "audio";
+				audioMsg = isDirectAudio
+					? msg.audioMessage
+					: isQuotedAudio
+						? quotedMsg.audioMessage
+						: isDirectAudioDoc
+							? msg.documentMessage
+							: quotedMsg.documentMessage;
+				audioSeconds = audioMsg?.seconds || 0;
+				audioLimit = maxStaticAudio;
+			} else if (isQuotedVideo) {
+				audioKind = "quoted-video";
+				audioMsg = quotedMsg.videoMessage;
+				audioSeconds = audioMsg?.seconds || 0;
+				audioLimit = maxStaticAudio;
+			}
+
+			if (!audioKind) {
+				return await reply(
+					`⚠️ *Tidak ada audio!*\n\nUntuk gambar, bot butuh sumber suara:\n` +
+						`• Kirim gambar dengan caption *${prefix}saudio* sambil membalas voice note/audio, atau\n` +
+						`• Pakai video yang sudah bersuara (caption/reply *${prefix}saudio*).`
+				);
+			}
+
+			const extFromMime = (mime = "") => {
+				const m = String(mime).split(";")[0].trim().toLowerCase();
+				if (m === "audio/mpeg") return "mp3";
+				if (m === "audio/ogg" || m === "audio/opus") return "ogg";
+				if (m === "audio/mp4" || m === "audio/m4a" || m === "audio/x-m4a") return "m4a";
+				if (m === "audio/wav" || m === "audio/x-wav") return "wav";
+				if (m === "video/quicktime") return "mov";
+				if (m === "video/webm") return "webm";
+				return "mp4";
+			};
+
+			await react("⏳");
+
+			try {
+				// Unduh visual sekali; kalau sumber audio = video yang sama, buffer dipakai ulang
+				const rawVisualBuffer = await downloadMediaBuffer(visualMsg, visualKind);
+				const webpBuffer =
+					visualKind === "image"
+						? await imageToWebp(rawVisualBuffer)
+						: await videoToWebp(rawVisualBuffer, config.sticker.maxVideoDurationSeconds);
+				const stickerBuffer = await addExif(webpBuffer, packname, author);
+
+				let audioBuffer;
+				try {
+					if (audioKind === "video") {
+						audioBuffer = await extractAudioOpus(rawVisualBuffer, audioLimit, extFromMime(visualMsg?.mimetype));
+					} else if (audioKind === "quoted-video") {
+						const rawAudioVideo = await downloadMediaBuffer(audioMsg, "video");
+						audioBuffer = await extractAudioOpus(rawAudioVideo, audioLimit, extFromMime(audioMsg?.mimetype));
+					} else {
+						const rawAudio = await downloadMediaBuffer(audioMsg, "audio");
+						audioBuffer = await extractAudioOpus(rawAudio, audioLimit, extFromMime(audioMsg?.mimetype));
+					}
+				} catch (audioErr) {
+					await react("❌");
+					return await reply(
+						`❌ Gagal mengambil audio: ${audioErr.message}\n\n` +
+							`Pastikan video/audio yang dipakai benar-benar punya trek suara (bukan video bisu).`
+					);
+				}
+
+				const trimmed = audioSeconds > audioLimit;
+				const sent = await sendAudioSticker(sock, from, m, {
+					stickerBuffer,
+					audioBuffer,
+					audioSeconds: Math.min(audioSeconds || audioLimit, audioLimit),
+				});
+				await react("✅");
+				await reply(
+					`🔊 *STIKER AUDIO TERKIRIM (EKSPERIMENTAL)*\n\n` +
+						`• Stiker: ${visualKind === "image" ? "gambar" : "video"} → WebP 512x512\n` +
+						`• Audio: ${sent.audioSeconds ?? "?"} detik${trimmed ? ` (dipotong dari ${audioSeconds} detik, batas ${audioLimit} detik)` : ""}\n\n` +
+						`⚠️ _Versi testing:_ Baileys v7 belum mendukung format sound sticker native WhatsApp, jadi bot mengirim stiker + klip audio sebagai pasangan (bukan satu stiker bersuara). ` +
+						`Kalau nanti Baileys menambah dukungannya, cukup ganti isi \`sendAudioSticker()\` di \`src/utils/mediaHelper.js\`.`
+				);
+			} catch (err) {
+				console.error("Error saat membuat stiker audio:", err);
+				await react("❌");
+				await reply(`❌ Gagal membuat stiker audio: ${err.message}`);
 			}
 			break;
 		}

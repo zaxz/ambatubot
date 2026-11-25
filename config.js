@@ -20,7 +20,14 @@ module.exports = {
     packName: 'AmbatuBOT',
     packAuthor: 'callmejeki🥀',
     maxVideoDurationSeconds: 9, // Maksimal durasi video/gif untuk stiker bergerak (detik)
-    maxSizeBytes: 1024 * 1024 // 1 MB batas wajar stiker WhatsApp
+    maxSizeBytes: 1024 * 1024, // 1 MB batas wajar stiker WhatsApp
+    // Stiker audio (sound sticker) — batas mengikuti fitur resmi WhatsApp
+    // (beta Android 2.26.47.1, WABetaInfo 2026-11-25): stiker dari gambar
+    // boleh membawa audio sampai 10 detik, stiker bergerak dari video
+    // membawa audio asli video sampai 5 detik. Audio dipotong otomatis
+    // kalau melebihi batas ini.
+    maxAudioDurationSeconds: 10,
+    maxVideoAudioSeconds: 5,
   },
 
   // Konfigurasi Otomatisasi Pesan & Auto-Responder
